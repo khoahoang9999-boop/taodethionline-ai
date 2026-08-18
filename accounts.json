@@ -1,0 +1,24 @@
+[
+  {
+    "id": "ADMIN123",
+    "customerName": "Hoàng Văn Đình Khoa (Admin Master)",
+    "phone": "0989982818",
+    "createdDate": "2026-01-01",
+    "expiryDate": "2099-12-31",
+    "maxDevices": 999,
+    "devices": [],
+    "status": "active",
+    "notes": "Tài khoản quản trị viên Master"
+  },
+  {
+    "id": "1111",
+    "customerName": "Tài khoản kiểm tra (1111)",
+    "phone": "0989982818",
+    "createdDate": "2026-01-01",
+    "expiryDate": "2099-12-31",
+    "maxDevices": 999,
+    "devices": [],
+    "status": "active",
+    "notes": "Mã tài khoản dùng thử và kiểm tra hệ thống"
+  }
+]

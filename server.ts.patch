@@ -1,0 +1,15 @@
+--- server.ts
++++ server.ts
+@@ -10,6 +10,12 @@
+     res.json({ status: "ok" });
+   });
+ 
++  app.use(express.json());
++  app.post("/api/log-error", (req, res) => {
++    console.log("USER BROWSER ERROR:", req.body);
++    require('fs').appendFileSync('user-errors.log', JSON.stringify(req.body) + '\n');
++    res.json({ success: true });
++  });
++
+   // Vite middleware for development
+   if (process.env.NODE_ENV !== "production") {

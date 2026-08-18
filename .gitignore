@@ -1,0 +1,25 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+# Exclude temporary and diagnostic files
+*.png
+*.py
+*.cjs
+temp*.json
+temp_*.json
+test-*.ts
+test-*.js
+test-*.cjs
+query-*.ts
+clean-*.ts
+test_*.js
+fix_*.py
+fix*.cjs
+replace.py
+vercel.json

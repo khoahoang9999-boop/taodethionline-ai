@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>Tạo đề thi Online</title>
+    <meta name="description" content="Hệ thống biên soạn đề kiểm tra, khung ma trận, bản đặc tả và đáp án chuẩn Chương trình GDPT 2018." />
+    <script>
+      (function() {
+        try {
+          var originalFetch = window.fetch;
+          if (originalFetch) {
+            var activeFetch = originalFetch;
+            try {
+              Object.defineProperty(window, 'fetch', {
+                get: function() { return activeFetch; },
+                set: function(fn) { activeFetch = fn; },
+                configurable: true,
+                enumerable: true
+              });
+            } catch (e1) {
+              try {
+                Object.defineProperty(Object.getPrototypeOf(window), 'fetch', {
+                  get: function() { return activeFetch; },
+                  set: function(fn) { activeFetch = fn; },
+                  configurable: true,
+                  enumerable: true
+                });
+              } catch (e2) {}
+            }
+          }
+        } catch (err) {}
+
+        window.addEventListener('unhandledrejection', function(event) {
+          if (event && event.reason) {
+            var msg = event.reason.message || String(event.reason);
+            if (typeof msg === 'string' && (msg.includes('WebSocket') || msg.includes('closed without opened'))) {
+              event.preventDefault();
+            }
+          }
+        });
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

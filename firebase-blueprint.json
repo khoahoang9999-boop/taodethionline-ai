@@ -1,0 +1,49 @@
+{
+  "entities": {
+    "Account": {
+      "title": "Account",
+      "description": "User accounts and device activations for exam generation software",
+      "type": "object",
+      "properties": {
+        "customerName": { "type": "string" },
+        "phone": { "type": "string" },
+        "createdDate": { "type": "string" },
+        "expiryDate": { "type": "string" },
+        "maxDevices": { "type": "number" },
+        "devices": { "type": "array", "items": { "type": "string" } },
+        "status": { "type": "string" },
+        "notes": { "type": "string" },
+        "apiKeys": { "type": "array", "items": { "type": "object" } }
+      },
+      "required": ["customerName", "phone", "status"]
+    },
+    "CustomPpct": {
+      "title": "CustomPpct",
+      "description": "Saved customized teaching curriculum plans",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "subject": { "type": "string" },
+        "grade": { "type": "string" },
+        "period": { "type": "string" },
+        "schoolYear": { "type": "string" },
+        "userCode": { "type": "string" },
+        "isPermanent": { "type": "boolean" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "scopeConfig": { "type": "object" }
+      },
+      "required": ["name", "subject", "grade", "period"]
+    }
+  },
+  "firestore": {
+    "/accounts/{id}": {
+      "schema": "Account",
+      "description": "Account list by user code ID"
+    },
+    "/custom_ppct/{id}": {
+      "schema": "CustomPpct",
+      "description": "Curriculum planning records"
+    }
+  }
+}

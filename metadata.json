@@ -1,0 +1,8 @@
+{
+  "name": "Remix TẠO ĐỀ KIỂM TRA 17/8",
+  "description": "Hệ thống xây dựng và xuất hồ sơ khảo thí, ma trận đề thi, bản đặc tả và đề thi kiểm tra định kỳ chuẩn Bộ GD&ĐT hỗ trợ nhập PPCT từ Excel, Word và thư viện SGK.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

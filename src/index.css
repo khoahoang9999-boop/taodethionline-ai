@@ -1,0 +1,12 @@
+@import "tailwindcss";
+
+@layer utilities {
+  .font-times {
+    font-family: "Times New Roman", Times, "Liberation Serif", serif !important;
+  }
+}
+
+.exam-preview-document,
+.exam-preview-document * {
+  font-family: "Times New Roman", Times, "Liberation Serif", serif;
+}
