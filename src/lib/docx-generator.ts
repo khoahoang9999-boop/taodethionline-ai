@@ -1251,7 +1251,7 @@ export async function generateDocx(data: TestData, specificVariantCode?: string)
           data,
           `KHUNG MA TRẬN & ĐẶC TẢ KIỂM TRA ${periodUpper}`,
           `Môn: Toán ${gradeText}`,
-          "Ma trận & Đặc tả"
+          ""
         ),
         new Paragraph({ spacing: { after: 180 }, children: [] }),
 
@@ -1456,7 +1456,7 @@ export async function generateDocx(data: TestData, specificVariantCode?: string)
             data,
             `KHUNG MA TRẬN ĐỀ KIỂM TRA ${periodUpper}`,
             `Môn: ${data.subject || "Tin học"} ${gradeText}`,
-            "Ma trận đề"
+            ""
           ),
           new Paragraph({ spacing: { after: 180 }, children: [] }),
           

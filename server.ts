@@ -179,6 +179,24 @@ function normalizeMatrixPercentagesBackend(matrix: any[], isFinalExam: boolean =
   }));
 }
 
+// Helper: Map model aliases to officially supported Gemini API models
+function resolveGeminiModelName(name: string): string {
+  const clean = (name || "").trim().toLowerCase();
+  if (clean === "gemini-3.1-flash" || clean === "gemini-3.1") {
+    return "gemini-3.1-flash-lite";
+  }
+  if (clean === "gemini-3.5-flash" || clean === "gemini-3.5") {
+    return "gemini-3.1-flash-lite";
+  }
+  if (clean === "gemini-2.5-flash" || clean === "gemini-2.5" || clean === "gemini-3.6-flash") {
+    return "gemini-3.7-flash";
+  }
+  if (clean === "gemini-flash" || clean === "flash") {
+    return "gemini-flash-latest";
+  }
+  return name;
+}
+
 // In-memory model state tracking for smart failover & degradation
 const modelCooldownMap = new Map<string, number>(); // modelName -> timestamp when cooldown expires
 let lastWorkingModel: string | null = null;
@@ -209,30 +227,27 @@ async function executeGeminiWithFailover({
   const startKeyIdx = globalKeyOffset % pool.length;
   globalKeyOffset = (globalKeyOffset + 1) % pool.length;
 
-  // Re-order pool starting from startKeyIdx
+  // Re-order pool starting from startKeyIdx and clean keys
   const rotatedPool: { key: string; label: string; origIdx: number }[] = [];
   for (let i = 0; i < pool.length; i++) {
     const idx = (startKeyIdx + i) % pool.length;
-    rotatedPool.push({ key: pool[idx].key, label: pool[idx].label || `Key #${idx + 1}`, origIdx: idx });
+    rotatedPool.push({ key: (pool[idx].key || "").trim(), label: pool[idx].label || `Key #${idx + 1}`, origIdx: idx });
   }
 
   console.log(`[Failover Runner] Bắt đầu gọi Gemini với Pool ${pool.length} Key (Khởi đầu với Key #${startKeyIdx + 1} ${rotatedPool[0].label})...`);
 
   let lastError: any = null;
 
-  // DANH SÁCH MODEL CHÍNH XÁC THEO QUY ĐỊNH BẮT BUỘC:
-  // 1. gemini-3.7-flash (Bậc 1: Ưu tiên cao nhất)
-  // 2. gemini-3.6-flash (Bậc 2)
-  // 3. gemini-3.5-flash (Bậc 3)
-  // 4. gemini-3.1-flash (Bậc 4)
-  // 5. gemini-2.5-flash (Bậc 5)
-  // TUYỆT ĐỐI CẤM SỬ DỤNG BẤT KỲ MODEL NÀO KHÁC NGOÀI DANH SÁCH NÀY (Không dùng 2.0 hay 1.5)
+  // DANH SÁCH MODEL CHUẨN GEMINI 3 ĐƯỢC GOOGLE HỖ TRỢ CHÍNH THỨC:
+  // 1. gemini-3.7-flash (Bậc 1: Model tiêu chuẩn thông minh nhất của Google)
+  // 2. gemini-3.1-flash-lite (Bậc 2: Tốc độ cao, dung lượng lớn)
+  // 3. gemini-flash-latest (Bậc 3: Tự động trỏ model flash mới nhất)
+  // 4. gemini-3.1-pro-preview (Bậc 4: Dự phòng chuyên sâu)
   const defaultModels = [
     "gemini-3.7-flash",
-    "gemini-3.6-flash",
-    "gemini-3.5-flash",
-    "gemini-3.1-flash",
-    "gemini-2.5-flash"
+    "gemini-3.1-flash-lite",
+    "gemini-flash-latest",
+    "gemini-3.1-pro-preview"
   ];
 
   // Build model execution queue: start with default sequence
@@ -251,11 +266,11 @@ async function executeGeminiWithFailover({
   console.log(`[Failover Runner] Danh sách Model ưu tiên: ${candidateModels.join(" -> ")}`);
 
   // QUY TRÌNH NGHIÊM NGẶT:
-  // Với mỗi Model (bắt đầu từ 3.7): Thử LẦN LƯỢT TẤT CẢ CÁC KEY trong Pool.
+  // Với mỗi Model: Thử LẦN LƯỢT TẤT CẢ CÁC KEY trong Pool.
   // Chỉ khi TẤT CẢ các Key trong Pool đều thất bại trên Model đó, mới chuyển sang Model kế tiếp!
   for (let mIdx = 0; mIdx < candidateModels.length; mIdx++) {
-    const modelName = candidateModels[mIdx];
-    let modelSuccess = false;
+    const rawModelName = candidateModels[mIdx];
+    const modelName = resolveGeminiModelName(rawModelName);
 
     console.log(`\n[Failover Stage] Bắt đầu kiểm tra Model [${modelName}] với toàn bộ ${rotatedPool.length} API Key...`);
 
@@ -263,6 +278,10 @@ async function executeGeminiWithFailover({
       const keyItem = rotatedPool[kIdx];
       const keyIdx = keyItem.origIdx;
       const keyLabel = keyItem.label;
+
+      if (!keyItem.key) {
+        continue;
+      }
 
       let client: GoogleGenAI;
       try {
@@ -280,10 +299,15 @@ async function executeGeminiWithFailover({
         attempt++;
         try {
           console.log(`[Failover Test] Model: ${modelName} | Key #${keyIdx + 1}/${pool.length} (${keyLabel}) [Lần thử ${attempt}/${maxAttempts}]...`);
+          
+          const mergedConfig = validateJson
+            ? { responseMimeType: "application/json", ...config }
+            : config;
+
           const genResult = await client.models.generateContent({
             model: modelName,
             contents: parts,
-            config: config
+            config: mergedConfig
           });
 
           if (genResult && genResult.text) {
@@ -291,9 +315,13 @@ async function executeGeminiWithFailover({
               try {
                 extractAndParseJson(genResult.text);
               } catch (parseErr: any) {
-                console.warn(`[Failover JSON Error] Key #${keyIdx + 1} (${keyLabel}) với Model ${modelName} trả về JSON không hợp lệ. Đổi sang Key tiếp theo trong cùng Model ${modelName}...`);
+                console.warn(`[Failover JSON Error] Key #${keyIdx + 1} (${keyLabel}) với Model ${modelName} parse JSON lần ${attempt} chưa thành công:`, (parseErr as any)?.message);
                 lastError = parseErr;
-                break; // Break attempts on this key, try next key in rotatedPool for the same model
+                if (attempt < maxAttempts) {
+                  await new Promise((r) => setTimeout(r, 600));
+                  continue; // Try attempt 2 on the same key!
+                }
+                break; // Exhausted attempts on this key, switch to next key
               }
             }
             console.log(`✅ [Failover Success] Thành công với Model [${modelName}] sử dụng Key #${keyIdx + 1} (${keyLabel})!`);
@@ -308,12 +336,14 @@ async function executeGeminiWithFailover({
           const isKeyInvalid =
             errMsg.includes("API_KEY_INVALID") ||
             errMsg.includes("Unauthorized") ||
+            errMsg.includes("UNAUTHENTICATED") ||
             errMsg.includes("401") ||
+            errMsg.includes("PERMISSION_DENIED") ||
             errMsg.includes("403");
 
           if (isKeyInvalid) {
-            console.warn(`[Failover Key Invalid] Key #${keyIdx + 1} (${keyLabel}) không hợp lệ hoặc không có quyền. Chuyển sang Key tiếp theo trong cùng Model ${modelName}...`);
-            break; // Try next key in rotatedPool for this model
+            console.warn(`[Failover Key Invalid] Key #${keyIdx + 1} (${keyLabel}) không hợp lệ hoặc bị từ chối quyền (401/403). Chuyển ngay sang Key tiếp theo...`);
+            break; // Skip directly to next key in rotatedPool
           }
 
           const isNotFound = errMsg.includes("404") || errMsg.includes("not found") || errMsg.includes("no longer available");
@@ -331,7 +361,12 @@ async function executeGeminiWithFailover({
             errMsg.includes("RESOURCE_EXHAUSTED");
 
           if (isRateLimitOrBusy) {
-            console.warn(`[Failover RateLimit/Busy] Key #${keyIdx + 1} bị quá tải/hạn mức. Giữ nguyên Model ${modelName}, chuyển sang Key tiếp theo...`);
+            if (attempt < maxAttempts) {
+              console.warn(`[Failover 503/429] Key #${keyIdx + 1} bận tạm thời. Đợi 1s rồi thử lại lần ${attempt + 1}...`);
+              await new Promise((r) => setTimeout(r, 1000));
+              continue;
+            }
+            console.warn(`[Failover RateLimit/Busy] Key #${keyIdx + 1} đã thử ${maxAttempts} lần. Chuyển sang Key tiếp theo trong cùng Model ${modelName}...`);
             break; // Try next key in rotatedPool for this same model
           }
 
@@ -395,11 +430,21 @@ function formatVietnameseError(err: any): string {
     msg.includes("API_KEY_INVALID") ||
     msg.includes("API key not valid") ||
     msg.includes("Unauthorized") ||
+    msg.includes("UNAUTHENTICATED") ||
     msg.includes("401") ||
     msg.includes("403") ||
-    msg.includes("invalid API key")
+    msg.includes("invalid API key") ||
+    msg.includes("authentication credentials")
   ) {
-    return "API Key không hợp lệ hoặc đã bị khóa. Vui lòng kiểm tra lại Key trong mục Cài đặt.";
+    return "API Key không hợp lệ, chưa được kích hoạt hoặc đã bị thu hồi. Vui lòng mở 'Cài đặt API Key' (hoặc biểu tượng Key ở thanh trên cùng), kiểm tra và nhập lại API Key chuẩn bắt đầu bằng 'AIzaSy...'.";
+  }
+
+  if (
+    msg.includes("404") ||
+    msg.includes("not found") ||
+    msg.includes("no longer available")
+  ) {
+    return "Model AI yêu cầu tạm thời không khả dụng trên hệ thống Google. Hệ thống đã tự động chuyển đổi sang model thế hệ mới phù hợp.";
   }
 
   if (
@@ -2194,6 +2239,52 @@ Chỉ trả về JSON thuần tuý, không có markdown hay bất kỳ lời d�
     } catch (error: any) {
       console.error("API Generate Study Guide Error:", error);
       return res.status(500).json({ error: formatVietnameseError(error) });
+    }
+  });
+
+  // API endpoint: Kiểm tra trạng thái hoạt động của 1 API Key cụ thể
+  app.post("/api/test-key", async (req, res) => {
+    try {
+      const { key } = req.body;
+      if (!key || typeof key !== "string" || !key.trim()) {
+        return res.status(400).json({ ok: false, error: "Vui lòng nhập API Key để kiểm tra." });
+      }
+
+      const cleanKey = key.trim();
+      const client = new GoogleGenAI({ apiKey: cleanKey });
+      
+      // Test generating a tiny 1-token output with the fastest standard model
+      const result = await client.models.generateContent({
+        model: "gemini-3.7-flash",
+        contents: "Hi",
+        config: { maxOutputTokens: 5 }
+      });
+
+      if (result && result.text) {
+        return res.json({ ok: true, message: "API Key hợp lệ và đang hoạt động tốt!" });
+      }
+      return res.json({ ok: true, message: "API Key hợp lệ." });
+    } catch (err: any) {
+      const errMsg = getErrorMessage(err);
+      if (errMsg.includes("UNAUTHENTICATED") || errMsg.includes("401") || errMsg.includes("API_KEY_INVALID")) {
+        return res.status(401).json({
+          ok: false,
+          error: "Lỗi 401 (UNAUTHENTICATED): API Key không hợp lệ hoặc sai định dạng. Vui lòng lấy lại Key từ aistudio.google.com."
+        });
+      }
+      if (errMsg.includes("PERMISSION_DENIED") || errMsg.includes("403")) {
+        return res.status(403).json({
+          ok: false,
+          error: "Lỗi 403 (PERMISSION_DENIED): Dự án Google Cloud chứa Key này đã bị tạm khóa hoặc từ chối quyền truy cập."
+        });
+      }
+      if (errMsg.includes("RESOURCE_EXHAUSTED") || errMsg.includes("429")) {
+        return res.status(429).json({
+          ok: false,
+          error: "Lỗi 429 (RESOURCE_EXHAUSTED): API Key đã sử dụng hết hạn mức (Quota). Vui lòng đổi Key khác."
+        });
+      }
+      return res.status(500).json({ ok: false, error: formatVietnameseError(err) });
     }
   });
 

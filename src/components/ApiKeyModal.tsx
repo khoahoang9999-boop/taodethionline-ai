@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Key, Plus, Trash2, Eye, EyeOff, Sparkles, Check, X, ShieldCheck, AlertCircle, ExternalLink, Edit3, User } from "lucide-react";
+import { Key, Plus, Trash2, Eye, EyeOff, Sparkles, Check, X, ShieldCheck, AlertCircle, ExternalLink, Edit3, User, RefreshCw, CheckCircle2, AlertTriangle, XCircle } from "lucide-react";
 
 export interface ApiKeyItem {
   id?: string;
@@ -35,6 +35,10 @@ export default function ApiKeyModal({
     return [{ id: `key-${Date.now()}-0`, key: "", label: "Key 1 (Chính)" }];
   });
 
+  const [testingStatus, setTestingStatus] = useState<{
+    [id: string]: { loading: boolean; ok?: boolean; message?: string };
+  }>({});
+
   // Re-sync keyList whenever modal opens with latest apiKeys
   React.useEffect(() => {
     if (isOpen) {
@@ -60,6 +64,46 @@ export default function ApiKeyModal({
     setVisibleKeys((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
+  const handleTestSingleKey = async (id: string, keyVal: string) => {
+    if (!keyVal || !keyVal.trim()) {
+      setTestingStatus((prev) => ({
+        ...prev,
+        [id]: { loading: false, ok: false, message: "Vui lòng nhập API Key trước khi kiểm tra." }
+      }));
+      return;
+    }
+
+    setTestingStatus((prev) => ({
+      ...prev,
+      [id]: { loading: true }
+    }));
+
+    try {
+      const res = await fetch("/api/test-key", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: keyVal.trim() })
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        setTestingStatus((prev) => ({
+          ...prev,
+          [id]: { loading: false, ok: true, message: data.message || "Key hoạt động tốt!" }
+        }));
+      } else {
+        setTestingStatus((prev) => ({
+          ...prev,
+          [id]: { loading: false, ok: false, message: data.error || "Key không hợp lệ hoặc đã hết hạn mức." }
+        }));
+      }
+    } catch (err: any) {
+      setTestingStatus((prev) => ({
+        ...prev,
+        [id]: { loading: false, ok: false, message: "Không thể kết nối máy chủ để kiểm tra Key." }
+      }));
+    }
+  };
+
   const handleAddKey = () => {
     const newIdx = keyList.length + 1;
     setKeyList([
@@ -81,6 +125,14 @@ export default function ApiKeyModal({
   };
 
   const handleUpdateField = (id: string, field: keyof ApiKeyItem, value: string) => {
+    // Reset test status when key value changes
+    if (field === "key") {
+      setTestingStatus((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    }
     setKeyList(
       keyList.map((k) => {
         if (k.id === id) {
@@ -167,19 +219,6 @@ export default function ApiKeyModal({
             </div>
           </div>
 
-          {/* Admin Default Key Banner */}
-          <div className="bg-emerald-50 border border-emerald-200/80 rounded-xl p-3.5 flex gap-3 text-emerald-900 text-xs leading-relaxed">
-            <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
-            <div className="space-y-1">
-              <p className="font-bold text-emerald-900 flex items-center gap-1.5">
-                Sử dụng Key hệ thống do Admin cấp:
-              </p>
-              <p className="text-emerald-800">
-                Nếu bạn không lưu API Key cá nhân nào, hệ thống sẽ tự động sử dụng <strong>API Key mặc định của Admin</strong> để duy trì quá trình sinh đề thi.
-              </p>
-            </div>
-          </div>
-
           {/* Key List Header */}
           <div className="flex items-center justify-between pt-1">
             <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5 uppercase tracking-wider">
@@ -199,62 +238,108 @@ export default function ApiKeyModal({
 
           {/* API Key Items */}
           <div className="space-y-3.5">
-            {keyList.map((item, index) => (
-              <div
-                key={item.id}
-                className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-3 relative group hover:border-blue-300 transition-colors"
-              >
-                {/* Top bar of Key Card */}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="w-5 h-5 rounded-full bg-slate-200 text-slate-700 font-bold text-[10px] flex items-center justify-center">
-                      {index + 1}
-                    </span>
-                    <input
-                      type="text"
-                      value={item.label || `Key ${index + 1}`}
-                      onChange={(e) => handleUpdateField(item.id!, "label", e.target.value)}
-                      placeholder="Tên đại diện Key (VD: Key 1 - Dự phòng)"
-                      className="text-xs font-bold text-slate-800 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-blue-500 outline-none px-1 py-0.5 rounded transition-all"
-                    />
+            {keyList.map((item, index) => {
+              const testInfo = testingStatus[item.id!];
+              return (
+                <div
+                  key={item.id}
+                  className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-3 relative group hover:border-blue-300 transition-colors"
+                >
+                  {/* Top bar of Key Card */}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="w-5 h-5 rounded-full bg-slate-200 text-slate-700 font-bold text-[10px] flex items-center justify-center">
+                        {index + 1}
+                      </span>
+                      <input
+                        type="text"
+                        value={item.label || `Key ${index + 1}`}
+                        onChange={(e) => handleUpdateField(item.id!, "label", e.target.value)}
+                        placeholder="Tên đại diện Key (VD: Key 1 - Dự phòng)"
+                        className="text-xs font-bold text-slate-800 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-blue-500 outline-none px-1 py-0.5 rounded transition-all"
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleTestSingleKey(item.id!, item.key)}
+                        disabled={testInfo?.loading || !item.key.trim()}
+                        className={`text-[11px] font-semibold px-2.5 py-1 rounded-md border flex items-center gap-1 transition-colors cursor-pointer ${
+                          testInfo?.loading
+                            ? "bg-slate-100 text-slate-400 border-slate-200"
+                            : "bg-white hover:bg-slate-100 text-slate-700 border-slate-300"
+                        }`}
+                      >
+                        <RefreshCw className={`w-3 h-3 ${testInfo?.loading ? "animate-spin text-blue-600" : "text-slate-500"}`} />
+                        <span>{testInfo?.loading ? "Đang thử..." : "Kiểm tra Key"}</span>
+                      </button>
+
+                      {keyList.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveKey(item.id!)}
+                          className="text-slate-400 hover:text-rose-600 p-1 rounded hover:bg-rose-50 transition-colors cursor-pointer"
+                          title="Xóa Key này"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
                   </div>
 
-                  {keyList.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveKey(item.id!)}
-                      className="text-slate-400 hover:text-rose-600 p-1 rounded hover:bg-rose-50 transition-colors cursor-pointer"
-                      title="Xóa Key này"
+                  {/* API Key Input */}
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                      Google Gemini API Key
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={visibleKeys[item.id!] ? "text" : "password"}
+                        value={item.key}
+                        onChange={(e) => handleUpdateField(item.id!, "key", e.target.value)}
+                        placeholder="Nhập API Key của bạn (AIzaSy...)"
+                        className={`w-full text-xs font-mono border rounded-lg pl-3 pr-10 py-2 bg-white text-slate-800 outline-none transition-all ${
+                          testInfo?.ok === false
+                            ? "border-rose-400 focus:border-rose-500 focus:ring-2 focus:ring-rose-500/20"
+                            : testInfo?.ok === true
+                            ? "border-emerald-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                            : "border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                        }`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => toggleVisibility(item.id!)}
+                        className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer"
+                      >
+                        {visibleKeys[item.id!] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Test Result Feedback Box */}
+                  {testInfo && !testInfo.loading && (
+                    <div
+                      className={`text-[11px] rounded-lg p-2.5 flex items-start gap-2 ${
+                        testInfo.ok
+                          ? "bg-emerald-50 border border-emerald-200 text-emerald-800"
+                          : "bg-rose-50 border border-rose-200 text-rose-800"
+                      }`}
                     >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                      {testInfo.ok ? (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                      ) : (
+                        <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                      )}
+                      <div className="space-y-0.5 leading-snug">
+                        <p className="font-bold">{testInfo.ok ? "Hoạt động tốt" : "Không thể sử dụng"}</p>
+                        <p className="text-[11px] opacity-90">{testInfo.message}</p>
+                      </div>
+                    </div>
                   )}
                 </div>
-
-                {/* API Key Input */}
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                    Google Gemini API Key
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={visibleKeys[item.id!] ? "text" : "password"}
-                      value={item.key}
-                      onChange={(e) => handleUpdateField(item.id!, "key", e.target.value)}
-                      placeholder="Nhập API Key của bạn (AIzaSy...)"
-                      className="w-full text-xs font-mono border border-slate-300 rounded-lg pl-3 pr-10 py-2 bg-white text-slate-800 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => toggleVisibility(item.id!)}
-                      className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer"
-                    >
-                      {visibleKeys[item.id!] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           {/* Plus Add Button Footer */}
