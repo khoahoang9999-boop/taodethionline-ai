@@ -695,18 +695,22 @@ export function StudyGuideTab({
                   <h3 className="font-bold text-sm uppercase text-slate-900 border-b border-slate-200 pb-1">
                     PHẦN A. TÓM TẮT KIẾN THỨC TRỌNG TÂM
                   </h3>
-                  {(studyGuideData.topics || []).map((topic, idx) => (
-                    <div key={idx} className="space-y-1 pl-2">
-                      <p className="font-bold text-emerald-900">
-                        • {topic.topic}{topic.lessonName ? `: ${topic.lessonName}` : ""}
-                      </p>
-                      <ul className="list-disc pl-6 space-y-0.5 text-slate-800">
-                        {(topic.summaryPoints || []).map((pt, pIdx) => (
-                          <li key={pIdx}>{pt}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  ))}
+                  {(studyGuideData.topics || []).map((topic, idx) => {
+                    const cleanTopic = (topic.topic || "").replace(/^[-•*+\s]+/, "").trim();
+                    const cleanLesson = (topic.lessonName || "").replace(/^[-•*+\s]+/, "").trim();
+                    return (
+                      <div key={idx} className="space-y-1 pl-2">
+                        <p className="font-bold text-slate-900">
+                          {cleanTopic}{cleanLesson ? `: ${cleanLesson}` : ""}
+                        </p>
+                        <ul className="list-disc pl-6 space-y-0.5 text-slate-800">
+                          {(topic.summaryPoints || []).map((pt, pIdx) => (
+                            <li key={pIdx}>{(pt || "").replace(/^[-•*+\s]+/, "").trim()}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    );
+                  })}
                 </div>
 
                 {/* Section B: Questions */}

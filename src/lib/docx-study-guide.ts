@@ -326,10 +326,14 @@ export async function exportStudyGuideToWord(data: StudyGuideData) {
   
   if (data.topics && data.topics.length > 0) {
     for (const t of data.topics) {
-      mainChildren.push(createTextWithIndent(`- ${t.topic}${t.lessonName ? `: ${t.lessonName}` : ""}`, true, false, AlignmentType.LEFT, 360));
+      const cleanTopic = (t.topic || "").replace(/^[-•*+\s]+/, "").trim();
+      const cleanLesson = (t.lessonName || "").replace(/^[-•*+\s]+/, "").trim();
+      const topicTitle = `${cleanTopic}${cleanLesson ? `: ${cleanLesson}` : ""}`;
+      mainChildren.push(createTextWithIndent(topicTitle, true, false, AlignmentType.LEFT, 360));
       if (t.summaryPoints) {
         for (const pt of t.summaryPoints) {
-          mainChildren.push(createTextWithIndent(`+ ${pt}`, false, false, AlignmentType.LEFT, 720));
+          const cleanPt = (pt || "").replace(/^[-•*+\s]+/, "").trim();
+          mainChildren.push(createTextWithIndent(`+ ${cleanPt}`, false, false, AlignmentType.LEFT, 720));
         }
       }
     }
