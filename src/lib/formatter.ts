@@ -39,8 +39,12 @@ export function parseAppliedQuestion(questionText: string): ParsedAppliedQuestio
 
   const hasSubItems = rawLines.length > 1 && hasSubItemMarker;
 
+  let firstLine = rawLines[0] || "";
+  // Strip obsolete prefix tags like "(Lý thuyết):" or "(Thực hành):" if present
+  firstLine = firstLine.replace(/^\((?:Lý\s*thuyết|Thực\s*hành)(?:\s*-\s*[0-9]+(?:,[0-9]+)?\s*điểm)?\)\s*[:\-]?\s*/i, "");
+
   return {
-    firstLine: rawLines[0],
+    firstLine,
     subLines: rawLines.slice(1),
     hasSubItems,
     rawLines,

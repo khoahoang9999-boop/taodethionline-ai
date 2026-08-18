@@ -605,7 +605,7 @@ function createSpecDescCell(s: SpecRow, isMath = false): TableCell {
             text: bulletText, 
             font: COMMON_FONT, 
             size: TABLE_SIZE,
-            underline: (count && count > 0) ? { type: UnderlineType.SINGLE, color: "000000" } : undefined
+            underline: (isMath && count && count > 0) ? { type: UnderlineType.SINGLE, color: "000000" } : undefined
           })
         ]
       }));
@@ -1630,13 +1630,13 @@ export async function generateDocx(data: TestData, specificVariantCode?: string)
         },
       },
       children: [
-        createOfficialHeaderTable(
-          data,
-          `BẢNG ĐẶC TẢ ĐỀ KIỂM TRA ${periodUpper}`,
-          `Môn: ${isMath ? "Toán" : (data.subject || "Tin học")} ${gradeText}`,
-          "Bản đặc tả"
+        createText(
+          `II. BẢNG ĐẶC TẢ ĐỀ KIỂM TRA ${periodUpper}, MÔN ${isMath ? "TOÁN" : (data.subject?.toUpperCase() || "TIN HỌC")} ${gradeText}`,
+          true,
+          false,
+          AlignmentType.LEFT
         ),
-        new Paragraph({ spacing: { after: 180 }, children: [] }),
+        new Paragraph({ spacing: { after: 120 }, children: [] }),
 
         new Table({
           width: { size: 100, type: WidthType.PERCENTAGE },

@@ -521,23 +521,84 @@ export default function ExamWorkspace({
               </div>
             )}
 
-            {/* Section 3: Ratio bar */}
-            <div className="p-4 border-b border-slate-100 space-y-2">
-              <div className="flex items-center justify-between text-xs font-bold text-slate-700">
-                <span>Tỷ lệ điểm định dạng</span>
-                <span className="text-blue-600 font-extrabold">40 - 30 - 30</span>
-              </div>
-              <div className="w-full bg-slate-200 h-2.5 rounded-full overflow-hidden flex">
-                <div className="bg-blue-500 h-full" style={{ width: "40%" }} title="Nhận biết: 40% (4.0đ)" />
-                <div className="bg-indigo-500 h-full" style={{ width: "30%" }} title="Thông hiểu: 30% (3.0đ)" />
-                <div className="bg-emerald-500 h-full" style={{ width: "30%" }} title="Vận dụng: 30% (3.0đ)" />
-              </div>
-              <div className="grid grid-cols-3 gap-1 text-[10px] text-slate-600 pt-1 font-semibold">
-                <div><span className="inline-block w-2 h-2 rounded-full bg-blue-500 mr-1" />NB: 4.0đ (40%)</div>
-                <div><span className="inline-block w-2 h-2 rounded-full bg-indigo-500 mr-1" />TH: 3.0đ (30%)</div>
-                <div><span className="inline-block w-2 h-2 rounded-full bg-emerald-500 mr-1" />VD: 3.0đ (30%)</div>
-              </div>
-            </div>
+            {/* Section 3: Ratio bar with clear distinct color differentiation */}
+            {(() => {
+              const isMathSubject = subject.toLowerCase().trim().includes("toán");
+              const matrix = testData?.matrix || [];
+              let nbPts = 4.0;
+              let thPts = 3.0;
+              let vdPts = 3.0;
+
+              if (matrix.length > 0) {
+                const totalMcqNb = matrix.reduce((sum: number, r: any) => sum + (Number(r.mcq_nb) || 0), 0);
+                const totalMcqTh = matrix.reduce((sum: number, r: any) => sum + (Number(r.mcq_th) || 0), 0);
+                const totalMcqVd = matrix.reduce((sum: number, r: any) => sum + (Number(r.mcq_vd) || 0), 0);
+
+                const totalTfNb = matrix.reduce((sum: number, r: any) => sum + (Number(r.tf_nb) || 0), 0);
+                const totalTfTh = matrix.reduce((sum: number, r: any) => sum + (Number(r.tf_th) || 0), 0);
+                const totalTfVd = matrix.reduce((sum: number, r: any) => sum + (Number(r.tf_vd) || 0), 0);
+
+                const totalSaNb = matrix.reduce((sum: number, r: any) => sum + (Number(r.sa_nb) || 0), 0);
+                const totalSaTh = matrix.reduce((sum: number, r: any) => sum + (Number(r.sa_th) || 0), 0);
+                const totalSaVd = matrix.reduce((sum: number, r: any) => sum + (Number(r.sa_vd) || 0), 0);
+
+                const totalTlNb = matrix.reduce((sum: number, r: any) => sum + (Number(r.tl_nb) || 0), 0);
+                const totalTlTh = matrix.reduce((sum: number, r: any) => sum + (Number(r.tl_th) || 0), 0);
+                const totalTlVd = matrix.reduce((sum: number, r: any) => sum + (Number(r.tl_vd) || 0), 0);
+
+                const calcNb = totalMcqNb * 0.25 + totalTfNb * 0.25 + (isMathSubject ? totalSaNb * 0.5 : 0) + totalTlNb * 1.0;
+                const calcTh = totalMcqTh * 0.25 + totalTfTh * 0.25 + (isMathSubject ? totalSaTh * 0.5 : 0) + (isMathSubject ? (totalTlTh > 0 ? totalTlTh * 1.0 : 1.0) : totalTlTh * 1.0);
+                const calcVd = totalMcqVd * 0.25 + totalTfVd * 0.25 + (isMathSubject ? totalSaVd * 0.5 : 0) + (totalTlVd > 0 ? totalTlVd * 1.0 : (isMathSubject ? 2.0 : 3.0));
+
+                if (calcNb > 0 || calcTh > 0 || calcVd > 0) {
+                  nbPts = Number(calcNb.toFixed(1));
+                  thPts = Number(calcTh.toFixed(1));
+                  vdPts = Number(calcVd.toFixed(1));
+                }
+              }
+
+              const totalPts = nbPts + thPts + vdPts || 10;
+              const nbPct = Math.round((nbPts / totalPts) * 100);
+              const thPct = Math.round((thPts / totalPts) * 100);
+              const vdPct = 100 - nbPct - thPct;
+
+              return (
+                <div className="p-4 border-b border-slate-100 space-y-2.5 bg-slate-50/40">
+                  <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-1.5 h-3.5 bg-yellow-500 rounded-xs"></span>
+                      <span>Tỷ lệ điểm định dạng</span>
+                    </span>
+                    <span className="font-extrabold text-[13px] tracking-tight">
+                      <span className="text-yellow-600">{nbPct}%</span>
+                      <span className="text-slate-400 mx-1">-</span>
+                      <span className="text-blue-600">{thPct}%</span>
+                      <span className="text-slate-400 mx-1">-</span>
+                      <span className="text-red-600">{vdPct}%</span>
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-200 h-3 rounded-full overflow-hidden flex shadow-inner">
+                    <div className="bg-yellow-500 h-full transition-all" style={{ width: `${nbPct}%` }} title={`Nhận biết (Vàng): ${nbPct}% (${nbPts}đ)`} />
+                    <div className="bg-blue-600 h-full transition-all" style={{ width: `${thPct}%` }} title={`Thông hiểu (Xanh): ${thPct}% (${thPts}đ)`} />
+                    <div className="bg-red-600 h-full transition-all" style={{ width: `${vdPct}%` }} title={`Vận dụng (Đỏ): ${vdPct}% (${vdPts}đ)`} />
+                  </div>
+                  <div className="grid grid-cols-3 gap-1.5 text-[10.5px] pt-0.5 font-bold">
+                    <div className="flex items-center bg-yellow-50 text-yellow-800 px-1.5 py-0.5 rounded border border-yellow-200 truncate" title={`Nhận biết: ${nbPts}đ (${nbPct}%)`}>
+                      <span className="inline-block w-2 h-2 rounded-full bg-yellow-500 mr-1 shrink-0" />
+                      <span className="truncate">NB: {nbPts}đ ({nbPct}%)</span>
+                    </div>
+                    <div className="flex items-center bg-blue-50 text-blue-800 px-1.5 py-0.5 rounded border border-blue-200 truncate" title={`Thông hiểu: ${thPts}đ (${thPct}%)`}>
+                      <span className="inline-block w-2 h-2 rounded-full bg-blue-600 mr-1 shrink-0" />
+                      <span className="truncate">TH: {thPts}đ ({thPct}%)</span>
+                    </div>
+                    <div className="flex items-center bg-red-50 text-red-800 px-1.5 py-0.5 rounded border border-red-200 truncate" title={`Vận dụng: ${vdPts}đ (${vdPct}%)`}>
+                      <span className="inline-block w-2 h-2 rounded-full bg-red-600 mr-1 shrink-0" />
+                      <span className="truncate">VD: {vdPts}đ ({vdPct}%)</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Section 4: Re-generate Action */}
             <div className="p-4 mt-auto">

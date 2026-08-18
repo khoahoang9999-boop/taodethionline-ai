@@ -220,15 +220,22 @@ async function executeGeminiWithFailover({
 
   let lastError: any = null;
 
-  // Active official Gemini Flash models in priority order:
-  // 1. gemini-3.7-flash (Ưu tiên cao nhất - Ổn định, chuẩn JSON & Tốc độ cao)
-  // 2. gemini-3.1-flash-lite (Dự phòng)
+  // DANH SÁCH MODEL CHÍNH XÁC THEO QUY ĐỊNH BẮT BUỘC:
+  // 1. gemini-3.7-flash (Bậc 1: Ưu tiên cao nhất)
+  // 2. gemini-3.6-flash (Bậc 2)
+  // 3. gemini-3.5-flash (Bậc 3)
+  // 4. gemini-3.1-flash (Bậc 4)
+  // 5. gemini-2.5-flash (Bậc 5)
+  // TUYỆT ĐỐI CẤM SỬ DỤNG BẤT KỲ MODEL NÀO KHÁC NGOÀI DANH SÁCH NÀY (Không dùng 2.0 hay 1.5)
   const defaultModels = [
     "gemini-3.7-flash",
-    "gemini-3.1-flash-lite"
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.1-flash",
+    "gemini-2.5-flash"
   ];
 
-  // Build model execution queue: start with last working model if valid, then remaining models
+  // Build model execution queue: start with default sequence
   const now = Date.now();
   let candidateModels = defaultModels.filter((m) => {
     const cooldownUntil = modelCooldownMap.get(m) || 0;
@@ -241,17 +248,19 @@ async function executeGeminiWithFailover({
     candidateModels = [...defaultModels];
   }
 
-  // Prioritize last working model if available in candidates
-  if (lastWorkingModel && candidateModels.includes(lastWorkingModel)) {
-    candidateModels = [
-      lastWorkingModel,
-      ...candidateModels.filter((m) => m !== lastWorkingModel)
-    ];
-  }
+  console.log(`[Failover Runner] Danh sách Model ưu tiên: ${candidateModels.join(" -> ")}`);
 
-  // Try each model across ALL available keys before falling back to next model
-  for (const modelName of candidateModels) {
-    for (const keyItem of rotatedPool) {
+  // QUY TRÌNH NGHIÊM NGẶT:
+  // Với mỗi Model (bắt đầu từ 3.7): Thử LẦN LƯỢT TẤT CẢ CÁC KEY trong Pool.
+  // Chỉ khi TẤT CẢ các Key trong Pool đều thất bại trên Model đó, mới chuyển sang Model kế tiếp!
+  for (let mIdx = 0; mIdx < candidateModels.length; mIdx++) {
+    const modelName = candidateModels[mIdx];
+    let modelSuccess = false;
+
+    console.log(`\n[Failover Stage] Bắt đầu kiểm tra Model [${modelName}] với toàn bộ ${rotatedPool.length} API Key...`);
+
+    for (let kIdx = 0; kIdx < rotatedPool.length; kIdx++) {
+      const keyItem = rotatedPool[kIdx];
       const keyIdx = keyItem.origIdx;
       const keyLabel = keyItem.label;
 
@@ -270,7 +279,7 @@ async function executeGeminiWithFailover({
       while (attempt < maxAttempts) {
         attempt++;
         try {
-          console.log(`[Failover] Key #${keyIdx + 1}/${pool.length} (${keyLabel}) -> Model: ${modelName} (lần ${attempt}/${maxAttempts})...`);
+          console.log(`[Failover Test] Model: ${modelName} | Key #${keyIdx + 1}/${pool.length} (${keyLabel}) [Lần thử ${attempt}/${maxAttempts}]...`);
           const genResult = await client.models.generateContent({
             model: modelName,
             contents: parts,
@@ -282,18 +291,18 @@ async function executeGeminiWithFailover({
               try {
                 extractAndParseJson(genResult.text);
               } catch (parseErr: any) {
-                console.warn(`[Failover Key Switch] Key #${keyIdx + 1} (${keyLabel}) với Model ${modelName} trả về JSON lỗi (${parseErr.message}). Tự động đổi sang Key khác...`);
+                console.warn(`[Failover JSON Error] Key #${keyIdx + 1} (${keyLabel}) với Model ${modelName} trả về JSON không hợp lệ. Đổi sang Key tiếp theo trong cùng Model ${modelName}...`);
                 lastError = parseErr;
-                break; // Break attempt loop, try next KEY in rotatedPool with same modelName
+                break; // Break attempts on this key, try next key in rotatedPool for the same model
               }
             }
-            console.log(`[Failover Success] Key #${keyIdx + 1} (${keyLabel}) với Model ${modelName} thành công!`);
+            console.log(`✅ [Failover Success] Thành công với Model [${modelName}] sử dụng Key #${keyIdx + 1} (${keyLabel})!`);
             lastWorkingModel = modelName;
             return genResult;
           }
         } catch (err: any) {
           const errMsg = getErrorMessage(err);
-          console.warn(`[Failover Warning] Key #${keyIdx + 1} (${keyLabel}) với Model ${modelName} gặp lỗi: ${errMsg}`);
+          console.warn(`⚠️ [Failover Warning] Model ${modelName} với Key #${keyIdx + 1} (${keyLabel}) gặp lỗi: ${errMsg}`);
           lastError = err;
 
           const isKeyInvalid =
@@ -303,33 +312,39 @@ async function executeGeminiWithFailover({
             errMsg.includes("403");
 
           if (isKeyInvalid) {
-            console.warn(`[Failover Switch Key] Key #${keyIdx + 1} bị lỗi API Key/Quyền. Chuyển sang Key tiếp theo...`);
-            break; // Try next key
+            console.warn(`[Failover Key Invalid] Key #${keyIdx + 1} (${keyLabel}) không hợp lệ hoặc không có quyền. Chuyển sang Key tiếp theo trong cùng Model ${modelName}...`);
+            break; // Try next key in rotatedPool for this model
           }
 
           const isNotFound = errMsg.includes("404") || errMsg.includes("not found") || errMsg.includes("no longer available");
           if (isNotFound) {
             modelCooldownMap.set(modelName, Date.now() + 86400000);
-            console.warn(`[Failover Deprecated Model] ${modelName} không khả dụng.`);
-            break;
+            console.warn(`[Failover Deprecated Model] ${modelName} không tồn tại trên hệ thống. Bỏ qua Model này.`);
+            break; // Break key loop for this non-existent model
           }
 
-          const isTransient = errMsg.includes("503") || errMsg.includes("high demand") || errMsg.includes("UNAVAILABLE") || errMsg.includes("429") || errMsg.includes("RESOURCE_EXHAUSTED");
-          if (isTransient) {
-            modelCooldownMap.set(modelName, Date.now() + 60000);
-            if (attempt < maxAttempts && !errMsg.includes("503") && !errMsg.includes("429")) {
-              await new Promise((r) => setTimeout(r, 1000 * attempt));
-              continue;
-            }
-            console.warn(`[Failover Switch Key/Model] Chuyển sang Key/Model tiếp theo...`);
-            break; // Try next key/model
+          const isRateLimitOrBusy = 
+            errMsg.includes("503") || 
+            errMsg.includes("high demand") || 
+            errMsg.includes("UNAVAILABLE") || 
+            errMsg.includes("429") || 
+            errMsg.includes("RESOURCE_EXHAUSTED");
+
+          if (isRateLimitOrBusy) {
+            console.warn(`[Failover RateLimit/Busy] Key #${keyIdx + 1} bị quá tải/hạn mức. Giữ nguyên Model ${modelName}, chuyển sang Key tiếp theo...`);
+            break; // Try next key in rotatedPool for this same model
           }
 
           if (attempt < maxAttempts) {
-            await new Promise((r) => setTimeout(r, 1000));
+            await new Promise((r) => setTimeout(r, 800));
           }
         }
       }
+    }
+
+    console.warn(`❌ [Failover Model Exhausted] Đã thử TOÀN BỘ ${rotatedPool.length} API Key trên Model [${modelName}] nhưng đều lỗi.`);
+    if (mIdx < candidateModels.length - 1) {
+      console.log(`➡️ [Model Downgrade] Tự động chuyển xuống Model cấp tiếp theo: [${candidateModels[mIdx + 1]}] và tiếp tục thử lại toàn bộ ${rotatedPool.length} Key...`);
     }
   }
 
@@ -1599,17 +1614,26 @@ Hãy xuất kết quả DƯỚI DẠNG JSON duy nhất theo cấu trúc:
 }`;
     } else if (partName === "part4" || partName === "applied") {
       const isTinHoc = subject.toLowerCase().trim() === "tin học";
+      const isPracticeFormat = (examFormat || "").toLowerCase().includes("thực hành");
+
+      const formatRules = isPracticeFormat
+        ? `4. QUY TẮC BẮT BUỘC THEO HÌNH THỨC THỰC HÀNH MÁY TÍNH:
+   - Giáo viên đã cấu hình hình thức: THỰC HÀNH MÁY TÍNH.
+   - TOÀN BỘ 03 CÂU LÀ CÁC BÀI TẬP THỰC HÀNH THAO TÁC TRÊN PHÒNG MÁY: Yêu cầu học sinh thực hành thao tác phần mềm trên máy tính cụ thể, rõ ràng, chi tiết từng bước (ví dụ: tạo cấu trúc thư mục/tệp, khởi động Scratch lập trình kịch bản theo yêu cầu, căn lề/soạn thảo văn bản Word, nhập công thức tính toán/định dạng trong Excel).
+   - Tuyệt đối không ra đề chung chung mập mờ để học sinh tự suy đoán.`
+        : `4. QUY TẮC BẮT BUỘC THEO HÌNH THỨC TỰ LUẬN TRÊN GIẤY (LƯU Ý TỐI THƯỢNG):
+   - Giáo viên đã cấu hình hình thức: TỰ LUẬN TRÊN GIẤY (BÀI TẬP VIẾT).
+   - TOÀN BỘ 03 CÂU PHẢI LÀ BÀI TẬP TỰ LUẬN LÀM TRÊN GIẤY: Các bài tập tính toán dung lượng dữ liệu, phân tích biểu diễn thông tin, xây dựng thuật toán / vẽ sơ đồ khối, giải thích khái niệm hoặc xử lý tình huống thực tế bằng bài viết trên giấy thi.
+   - CẤM TUYỆT ĐỐI RA ĐỀ BÀI THAO TÁC PHÒNG MÁY TÍNH (như bật máy tính, nháy chuột, tạo thư mục trên ổ đĩa máy tính, chạy phần mềm máy tính).
+   - CẤM TUYỆT ĐỐI GHI NHÃN HOẶC TIỀN TỐ '(Thực hành)' HAY '(Lý thuyết)' Ở ĐẦU CÂU HỎI. Viết trực tiếp nội dung đề bài chuẩn mực sư phạm.`;
+
       partPrompt = `Bạn là AI Chuyên gia Khảo thí môn ${subject} cấp THCS (GDPT 2018).
-Nhiệm vụ: Biên soạn duy nhất PHẦN B: CÂU HỎI ${examFormat ? examFormat.toUpperCase() : "TỰ LUẬN"} (03 CÂU HỎI, ${isMath ? "Câu 19 đến Câu 21" : "Câu 17 đến Câu 19"}) cho Mã đề ${examCode} môn ${subject} ${grade} (${period}).
+Nhiệm vụ: Biên soạn duy nhất PHẦN B: CÂU HỎI ${isPracticeFormat ? "THỰC HÀNH TRÊN MÁY TÍNH" : "TỰ LUẬN"} (03 CÂU HỎI, ${isMath ? "Câu 19 đến Câu 21" : "Câu 17 đến Câu 19"}) cho Mã đề ${examCode} môn ${subject} ${grade} (${period}).
 LƯU Ý BẮT BUỘC:
 1. Dựa sát 100% vào Bảng đặc tả và Ma trận.
 2. Mỗi câu 1,0 điểm, kèm đáp án và thang điểm/rubric chi tiết đến 0,25đ hoặc 0,5đ.
-3. Lời giải và đáp án viết súc tích, đầy đủ ý chuẩn mực toán học/khoa học, không lan man rườm rà.
-${isTinHoc ? `4. QUY TẮC RIÊNG CHO MÔN TIN HỌC (BẮT BUỘC):
-   - Đề thi môn Tin học phải có đầy đủ cả 2 dạng câu hỏi tự luận/vận dụng:
-     a) CÂU HỎI THỰC HÀNH (THAO TÁC TRÊN PHÒNG MÁY TÍNH): Phải chỉ rõ các yêu cầu thực tế, rõ ràng, chi tiết từng bước thao tác thực hiện trên phòng máy tính (ví dụ: tạo thư mục, khởi động Scratch để lập trình một chương trình cụ thể, thực hiện căn lề, nhập công thức tính toán trong Excel, v.v.). Tuyệt đối không được ra đề chung chung mập mờ để học sinh tự suy đoán.
-     b) CÂU HỎI TỰ LUẬN LÝ THUYẾT: Các câu hỏi phân tích, thiết kế thuật toán bằng sơ đồ khối, giải thích các tình huống thực tế hay khái niệm tin học một cách sư phạm.
-   - Các câu hỏi phải được ghi rõ rạch ròi đâu là câu Thực hành, đâu là câu Lý thuyết để học sinh dễ dàng thực hiện.` : ""}
+3. Lời giải và đáp án viết súc tích, đầy đủ ý chuẩn mực khoa học/sư phạm, không lan man rườm rà.
+${formatRules}
 
 MA TRẬN:
 ${JSON.stringify(matrix, null, 2)}
@@ -1622,7 +1646,7 @@ Hãy xuất kết quả DƯỚI DẠNG JSON duy nhất theo cấu trúc:
   "applied": [
     {
       "id": ${isMath ? 19 : 17},
-      "question": "Nội dung câu hỏi tự luận/thực hành",
+      "question": "Nội dung câu hỏi ${isPracticeFormat ? "thực hành máy tính" : "tự luận trên giấy"}",
       "answer": "Đáp án và lời giải chi tiết",
       "pointsBreakdown": [
         { "criteria": "Ý 1", "points": "0.5" },
@@ -1804,15 +1828,19 @@ Schema JSON:
   "explanation": "Giải thích phép tính..."
 }`;
       } else {
-        typeSchemaPrompt = `Loại câu hỏi: VẬN DỤNG / ${examFormat.toUpperCase()} (Câu ${questionId})
+        const isPracticeQ = (examFormat || "").toLowerCase().includes("thực hành");
+        typeSchemaPrompt = `Loại câu hỏi: VẬN DỤNG / ${isPracticeQ ? "THỰC HÀNH MÁY TÍNH" : "TỰ LUẬN TRÊN GIẤY"} (Câu ${questionId})
 Ràng buộc:
 - 01 bài tập/tình huống vận dụng thực tiễn phù hợp thời lượng và thang điểm 1,0 điểm.
+${isPracticeQ 
+  ? "- Yêu cầu thao tác cụ thể trên phòng máy tính (tạo thư mục, soạn thảo, bảng tính, Scratch, Python...)." 
+  : "- Bài tập tự luận làm trên giấy (tính toán dung lượng, biểu diễn thông tin, thuật toán, sơ đồ khối, giải thích tình huống). TUYỆT ĐỐI KHÔNG yêu cầu thao tác phòng máy tính và CẤM TUYỆT ĐỐI ghi nhãn '(Lý thuyết)' hay '(Thực hành)'."}
 - Hướng dẫn giải chi tiết, rõ ràng từng bước.
 - Rubric thang điểm chi tiết (pointsBreakdown) chia nhỏ các ý (0.25đ, 0.5đ...) tổng bằng 1.0 điểm.
 Schema JSON:
 {
   "id": ${questionId},
-  "question": "Yêu cầu bài toán / tình huống thực hành...",
+  "question": "Yêu cầu bài toán / câu hỏi tự luận...",
   "answer": "Đáp án / Hướng dẫn giải chi tiết...",
   "pointsBreakdown": [
     { "criteria": "Ý 1...", "points": "0.5" },

@@ -104,7 +104,7 @@ export default function SpecificationView({
               ? line 
               : `– ${line}`;
             return (
-              <p key={lIdx} className={`leading-relaxed text-[11px] text-gray-900 ${(count && count > 0) ? 'underline underline-offset-2' : ''}`}>
+              <p key={lIdx} className={`leading-relaxed text-[11px] text-gray-900 ${(isMath && count && count > 0) ? 'underline underline-offset-2' : ''}`}>
                 {formattedLine}
               </p>
             );
