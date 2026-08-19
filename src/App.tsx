@@ -792,48 +792,44 @@ export default function App() {
         return data;
       };
 
-      // Step 1: Part 1 - MCQ (12 câu)
-      setLoadingMessage(`Đang biên soạn Mã đề ${codeToGen} — Phần 1: Trắc nghiệm 12 câu...`);
-      const res1 = await fetch("/api/generate-variant", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...basePayload, part: "part1" }),
-        signal: abortControllerRef.current?.signal,
-      });
-      const data1 = await parseSafeResponse(res1, `Lỗi tạo Phần 1 cho Mã đề ${codeToGen}`);
+      // TỐI ƯU TỐC ĐỘ: Biên soạn song song toàn bộ các phần (Part 1, 2, 3, 4) của Mã đề cùng lúc
+      setLoadingMessage(`Đang biên soạn song song toàn bộ các phần của Mã đề ${codeToGen}...`);
 
-      // Step 2: Part 2 - TF
-      setLoadingMessage(`Đang biên soạn Mã đề ${codeToGen} — Phần 2: Trắc nghiệm đúng - sai...`);
-      const res2 = await fetch("/api/generate-variant", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...basePayload, part: "part2" }),
-        signal: abortControllerRef.current?.signal,
-      });
-      const data2 = await parseSafeResponse(res2, `Lỗi tạo Phần 2 cho Mã đề ${codeToGen}`);
-
-      // Step 3: Part 3 - Short Answer (chỉ áp dụng cho môn Toán)
-      let data3 = { shortAnswer: [] };
-      if (isMath) {
-        setLoadingMessage(`Đang biên soạn Mã đề ${codeToGen} — Phần 3: Trắc nghiệm trả lời ngắn...`);
-        const res3 = await fetch("/api/generate-variant", {
+      const [res1, res2, res3, res4] = await Promise.all([
+        fetch("/api/generate-variant", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...basePayload, part: "part3" }),
+          body: JSON.stringify({ ...basePayload, part: "part1" }),
           signal: abortControllerRef.current?.signal,
-        });
-        data3 = await parseSafeResponse(res3, `Lỗi tạo Phần 3 cho Mã đề ${codeToGen}`);
-      }
+        }),
+        fetch("/api/generate-variant", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...basePayload, part: "part2" }),
+          signal: abortControllerRef.current?.signal,
+        }),
+        isMath
+          ? fetch("/api/generate-variant", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ ...basePayload, part: "part3" }),
+              signal: abortControllerRef.current?.signal,
+            })
+          : Promise.resolve(null),
+        fetch("/api/generate-variant", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...basePayload, part: "part4" }),
+          signal: abortControllerRef.current?.signal,
+        }),
+      ]);
 
-      // Step 4: Part 4 - Applied / Tự luận
-      setLoadingMessage(`Đang hoàn thiện Mã đề ${codeToGen} — Phần B: Tự luận & Hướng dẫn chấm...`);
-      const res4 = await fetch("/api/generate-variant", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...basePayload, part: "part4" }),
-        signal: abortControllerRef.current?.signal,
-      });
-      const data4 = await parseSafeResponse(res4, `Lỗi tạo Phần B cho Mã đề ${codeToGen}`);
+      const [data1, data2, data3, data4] = await Promise.all([
+        parseSafeResponse(res1 as Response, `Lỗi tạo Phần 1 cho Mã đề ${codeToGen}`),
+        parseSafeResponse(res2 as Response, `Lỗi tạo Phần 2 cho Mã đề ${codeToGen}`),
+        res3 ? parseSafeResponse(res3 as Response, `Lỗi tạo Phần 3 cho Mã đề ${codeToGen}`) : Promise.resolve({ shortAnswer: [] }),
+        parseSafeResponse(res4 as Response, `Lỗi tạo Phần B cho Mã đề ${codeToGen}`),
+      ]);
 
       const newVariant = {
         code: codeToGen,

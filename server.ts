@@ -2,7 +2,7 @@ import { createServer as createViteServer } from "vite";
 import fs from "fs";
 import express from "express";
 import path from "path";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import mammoth from "mammoth";
 import * as XLSX from "xlsx";
 import dotenv from "dotenv";
@@ -238,14 +238,14 @@ async function executeGeminiWithFailover({
 
   let lastError: any = null;
 
-  // DANH SÁCH MODEL CHUẨN GEMINI 3 ĐƯỢC GOOGLE HỖ TRỢ CHÍNH THỨC:
-  // 1. gemini-3.7-flash (Bậc 1: Model tiêu chuẩn thông minh nhất của Google)
-  // 2. gemini-3.1-flash-lite (Bậc 2: Tốc độ cao, dung lượng lớn)
+  // DANH SÁCH MODEL CHUẨN GEMINI 3 ĐƯỢC GOOGLE HỖ TRỢ CHÍNH THỨC (Ưu tiên tốc độ siêu tốc và chất lượng cao):
+  // 1. gemini-3.1-flash-lite (Bậc 1: Tốc độ phản hồi cực nhanh ~1-3s, độ trễ tối thiểu)
+  // 2. gemini-3.7-flash (Bậc 2: Model đa năng, thông minh nhất với ThinkingLevel.LOW)
   // 3. gemini-flash-latest (Bậc 3: Tự động trỏ model flash mới nhất)
   // 4. gemini-3.1-pro-preview (Bậc 4: Dự phòng chuyên sâu)
   const defaultModels = [
-    "gemini-3.7-flash",
     "gemini-3.1-flash-lite",
+    "gemini-3.7-flash",
     "gemini-flash-latest",
     "gemini-3.1-pro-preview"
   ];
@@ -300,9 +300,16 @@ async function executeGeminiWithFailover({
         try {
           console.log(`[Failover Test] Model: ${modelName} | Key #${keyIdx + 1}/${pool.length} (${keyLabel}) [Lần thử ${attempt}/${maxAttempts}]...`);
           
-          const mergedConfig = validateJson
+          const mergedConfig: any = validateJson
             ? { responseMimeType: "application/json", ...config }
-            : config;
+            : { ...config };
+
+          // Minimize latency: Enable ThinkingLevel.LOW for models with thinking capability so they respond instantly
+          if (!mergedConfig.thinkingConfig && (modelName.includes("3.7") || modelName.includes("3.1") || modelName.includes("2.5"))) {
+            try {
+              mergedConfig.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
+            } catch {}
+          }
 
           const genResult = await client.models.generateContent({
             model: modelName,
@@ -2255,9 +2262,9 @@ Chỉ trả về JSON thuần tuý, không có markdown hay bất kỳ lời d�
       
       // Test generating a tiny 1-token output with the fastest standard model
       const result = await client.models.generateContent({
-        model: "gemini-3.7-flash",
+        model: "gemini-3.1-flash-lite",
         contents: "Hi",
-        config: { maxOutputTokens: 5 }
+        config: { maxOutputTokens: 5, thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } }
       });
 
       if (result && result.text) {
