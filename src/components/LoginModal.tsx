@@ -1,7 +1,7 @@
 import React, { useState } from "react";
-import { Lock, X, Key, ShieldAlert, Phone, Sparkles, CheckCircle2, UserCheck, AlertCircle } from "lucide-react";
+import { Lock, X, Key, ShieldAlert, Phone, Sparkles, CheckCircle2, UserCheck, AlertCircle, Edit3 } from "lucide-react";
 import { getDeviceId } from "../lib/device-id";
-import { clientLogin } from "../lib/client-auth";
+import { clientLogin, clientUpdateProfile } from "../lib/client-auth";
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -14,9 +14,17 @@ export default function LoginModal({
   isOpen,
   onClose,
   onLoginSuccess,
-  pendingActionName = "Tải File Hồ sơ Khảo thí"
+  pendingActionName = "Sử dụng tính năng Khảo thí"
 }: LoginModalProps) {
-  const [code, setCode] = useState("");
+  const [loginUsername, setLoginUsername] = useState(
+    () => localStorage.getItem("khaothi_account_username") || localStorage.getItem("khaothi_account_name") || ""
+  );
+  const [displayName, setDisplayName] = useState(
+    () => localStorage.getItem("khaothi_account_display_name") || ""
+  );
+  const [code, setCode] = useState(
+    () => localStorage.getItem("khaothi_account_password") || localStorage.getItem("khaothi_account_code") || ""
+  );
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -24,8 +32,12 @@ export default function LoginModal({
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!loginUsername.trim()) {
+      setErrorMessage("Vui lòng nhập Tên đăng nhập.");
+      return;
+    }
     if (!code.trim()) {
-      setErrorMessage("Vui lòng nhập Mã tài khoản được cấp.");
+      setErrorMessage("Vui lòng nhập Mật khẩu.");
       return;
     }
 
@@ -34,19 +46,50 @@ export default function LoginModal({
 
     try {
       const deviceId = getDeviceId();
-      const data = await clientLogin(code.trim(), deviceId);
+      const data = await clientLogin(loginUsername.trim(), code.trim(), deviceId);
 
       if (!data || !data.success) {
-        setErrorMessage(data?.error || "Mã tài khoản không hợp lệ hoặc đã bị khóa.");
+        setErrorMessage(
+          data?.error ||
+          "Tên đăng nhập hoặc Mật khẩu không chính xác. Vui lòng kiểm tra lại thông tin hoặc liên hệ Quản trị viên."
+        );
         setIsLoading(false);
         return;
       }
 
-      // Save token to localStorage
-      localStorage.setItem("khaothi_account_code", data.account.id);
-      localStorage.setItem("khaothi_account_data", JSON.stringify(data.account));
+      let finalAccount = { ...data.account };
 
-      onLoginSuccess(data.account);
+      // Nếu giáo viên có nhập Tên hiển thị riêng lúc đăng nhập thì cập nhật ngay Tên hiển thị
+      if (displayName.trim() && displayName.trim() !== finalAccount.customerName) {
+        try {
+          const profRes = await clientUpdateProfile(
+            finalAccount.id,
+            deviceId,
+            displayName.trim(),
+            finalAccount.phone,
+            finalAccount.notes,
+            finalAccount.avatar,
+            finalAccount.username || loginUsername.trim()
+          );
+          if (profRes && profRes.success && profRes.account) {
+            finalAccount = { ...finalAccount, ...profRes.account };
+          } else {
+            finalAccount.customerName = displayName.trim();
+          }
+        } catch {
+          finalAccount.customerName = displayName.trim();
+        }
+      }
+
+      // Save token & data to localStorage
+      localStorage.setItem("khaothi_account_username", finalAccount.username || loginUsername.trim());
+      localStorage.setItem("khaothi_account_display_name", finalAccount.customerName || "");
+      localStorage.setItem("khaothi_account_name", finalAccount.customerName || loginUsername.trim());
+      localStorage.setItem("khaothi_account_code", finalAccount.id);
+      localStorage.setItem("khaothi_account_password", code.trim());
+      localStorage.setItem("khaothi_account_data", JSON.stringify(finalAccount));
+
+      onLoginSuccess(finalAccount);
       onClose();
     } catch (err: any) {
       setErrorMessage(err?.message || "Lỗi kết nối máy chủ. Vui lòng kiểm tra lại mạng.");
@@ -74,8 +117,8 @@ export default function LoginModal({
               <Lock className="w-5 h-5 text-blue-300" />
             </div>
             <div>
-              <h3 className="text-base font-bold text-white">Yêu cầu Đăng nhập Tài khoản</h3>
-              <p className="text-xs text-blue-200">Để thực hiện: <strong className="text-amber-300 font-semibold">{pendingActionName}</strong></p>
+              <h3 className="text-base font-bold text-white">Đăng nhập Hệ thống</h3>
+              <p className="text-xs text-blue-200">Yêu cầu xác thực: <strong className="text-amber-300 font-semibold">{pendingActionName}</strong></p>
             </div>
           </div>
         </div>
@@ -83,35 +126,80 @@ export default function LoginModal({
         {/* Content Body */}
         <div className="p-5 space-y-4">
           {/* Note Banner */}
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-900 space-y-1">
-            <div className="flex items-center gap-1.5 font-bold text-amber-900">
-              <Sparkles className="w-4 h-4 text-amber-600 shrink-0" />
-              <span>Chính sách sử dụng tính năng:</span>
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-xs text-blue-950 space-y-1.5">
+            <div className="flex items-center gap-1.5 font-bold text-blue-900">
+              <Sparkles className="w-4 h-4 text-blue-600 shrink-0" />
+              <span>Hướng dẫn đăng nhập:</span>
             </div>
             <p className="text-[11.5px] leading-relaxed text-slate-700">
-              Quý Thầy/Cô được tự do <strong>xem, cấu hình, soạn đề, đổi câu hỏi và xem ma trận đặc tả</strong>. Tính năng <strong>Tải file Word/PDF</strong> chỉ dành cho tài khoản đã được cấp phép.
+              • Quý Thầy/Cô đăng nhập bằng <strong>Tên đăng nhập</strong> và <strong>Mật khẩu</strong>.<br/>
+              • Tài khoản chưa cấp hạn dùng được <strong>dùng thử 5 lần soạn đề</strong> miễn phí. Giáo viên vui lòng tự nhập <strong>Gemini API Key</strong> cá nhân nếu tài khoản chưa có Key.
             </p>
           </div>
 
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div className="space-y-1.5">
-              <label className="block text-xs font-bold text-slate-700">
-                Mã tài khoản được cấp:
+          <form onSubmit={handleLogin} className="space-y-3.5">
+            {/* 1. Login Username Input */}
+            <div className="space-y-1">
+              <label className="block text-xs font-bold text-slate-700 flex items-center justify-between">
+                <span>1. Tên đăng nhập (*):</span>
+                <span className="text-[10.5px] text-indigo-600 font-medium">Dùng để xác thực</span>
               </label>
               <div className="relative">
                 <input
                   type="text"
-                  value={code}
+                  value={loginUsername}
                   onChange={(e) => {
-                    setCode(e.target.value.toUpperCase());
+                    setLoginUsername(e.target.value);
                     setErrorMessage(null);
                   }}
-                  placeholder="Hãy nhập mã vào đây"
-                  className="w-full pl-9 pr-3 py-2.5 text-sm font-bold tracking-wider text-blue-900 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none uppercase placeholder:normal-case placeholder:font-normal"
+                  placeholder="Ví dụ: admin, cothao_tinhoc..."
+                  className="w-full pl-9 pr-3 py-2 text-sm font-semibold text-indigo-950 bg-indigo-50/30 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:bg-white outline-none"
                   autoFocus
                 />
-                <Key className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                <UserCheck className="w-4 h-4 text-indigo-500 absolute left-3 top-2.5" />
               </div>
+            </div>
+
+            {/* 2. Separate Display Name Input */}
+            <div className="space-y-1">
+              <label className="block text-xs font-bold text-slate-700 flex items-center justify-between">
+                <span>2. Tên hiển thị riêng (Họ và tên giáo viên):</span>
+                <span className="text-[10.5px] text-blue-600 font-medium">Hiện trên giao diện</span>
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={displayName}
+                  onChange={(e) => {
+                    setDisplayName(e.target.value);
+                    setErrorMessage(null);
+                  }}
+                  placeholder="Ví dụ: Thầy Nguyễn Văn A (để trống giữ tên hiện tại)"
+                  className="w-full pl-9 pr-3 py-2 text-sm font-semibold text-slate-800 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                />
+                <Edit3 className="w-4 h-4 text-blue-500 absolute left-3 top-2.5" />
+              </div>
+            </div>
+
+            {/* 3. Password Input */}
+            <div className="space-y-1">
+              <label className="block text-xs font-bold text-slate-700">
+                3. Mật khẩu (*):
+              </label>
+              <div className="relative">
+                <input
+                  type="password"
+                  value={code}
+                  onChange={(e) => {
+                    setCode(e.target.value);
+                    setErrorMessage(null);
+                  }}
+                  placeholder="Nhập mật khẩu của bạn..."
+                  className="w-full pl-9 pr-3 py-2 text-sm font-bold text-slate-800 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                />
+                <Key className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+              </div>
+              <p className="text-[10.5px] text-slate-500 italic">Nhập tên đăng nhập và mật khẩu được Admin cấp.</p>
             </div>
 
             {/* Error Display */}
@@ -126,8 +214,8 @@ export default function LoginModal({
 
             <button
               type="submit"
-              disabled={isLoading || !code.trim()}
-              className="w-full bg-blue-600 hover:bg-blue-500 active:scale-[0.99] text-white font-bold py-2.5 px-4 rounded-xl text-sm transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer"
+              disabled={isLoading || !loginUsername.trim() || !code.trim()}
+              className="w-full bg-blue-600 hover:bg-blue-500 active:scale-[0.99] text-white font-bold py-2.5 px-4 rounded-xl text-sm transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer mt-2"
             >
               {isLoading ? (
                 <>
@@ -137,7 +225,7 @@ export default function LoginModal({
               ) : (
                 <>
                   <UserCheck className="w-4 h-4" />
-                  <span>Đăng nhập</span>
+                  <span>Đăng nhập hệ thống</span>
                 </>
               )}
             </button>

@@ -54,173 +54,265 @@ export function formatDateVN(dateStr?: string): string {
   return dateStr;
 }
 
+export function isAccountLicensed(expiryDate?: string): boolean {
+  if (!expiryDate || !expiryDate.trim()) return false;
+  if (expiryDate === "Chưa cấp" || expiryDate === "chua-cap") return false;
+  if (expiryDate === "2099-12-31" || expiryDate === "vinh-vien" || expiryDate === "Vĩnh viễn") return true;
+  const today = getTodayString();
+  return expiryDate >= today;
+}
+
+export function normalizeVietnameseName(s: string): string {
+  if (!s) return "";
+  return s
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/[^a-z0-9]/g, "");
+}
+
 /**
  * Robust Dual-Layer Authentication.
- * 1. Tries Server Endpoint `/api/auth/login`.
- * 2. If Server is unreachable or returns HTML, immediately and seamlessly falls back to direct Firestore.
+ * 1. Checks user name and password (account code).
+ * 2. Directly talks to Firestore or Server Endpoint `/api/auth/login`.
  */
-export async function clientLogin(code: string, deviceId: string): Promise<any> {
-  if (!code || !code.trim()) {
-    return { success: false, error: "Vui lòng nhập Mã tài khoản được cấp." };
+export async function clientLogin(
+  nameOrCode: string,
+  codeOrDeviceId?: string,
+  deviceIdArg?: string
+): Promise<any> {
+  let name = "";
+  let code = "";
+  let deviceId = "";
+
+  if (deviceIdArg !== undefined) {
+    name = (nameOrCode || "").trim();
+    code = (codeOrDeviceId || "").trim();
+    deviceId = (deviceIdArg || "").trim();
+  } else {
+    code = (nameOrCode || "").trim();
+    deviceId = (codeOrDeviceId || "").trim();
   }
 
-  const normalizedCode = code.trim().toUpperCase();
+  if (!name || !name.trim()) {
+    return { success: false, error: "Vui lòng nhập Tên đăng nhập." };
+  }
 
-  // 1. Direct Firestore Client Check (Fastest, 100% reliable across all hosting providers including Vercel)
+  if (!code || !code.trim()) {
+    return { success: false, error: "Vui lòng nhập Mật khẩu." };
+  }
+
+  // 1. Try Server Endpoint First (Unified robust auth logic)
+  try {
+    const res = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, customerName: name, code, password: code, deviceId }),
+    });
+
+    const contentType = res.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
+      const data = await res.json();
+      if (data && data.success) {
+        return data;
+      }
+      if (data && data.error) {
+        return data;
+      }
+    }
+  } catch (serverErr) {
+    console.warn("Server auth endpoint unavailable, falling back to direct Firestore...", serverErr);
+  }
+
+  // 2. Direct Firestore Client Fallback
   try {
     const db = getClientDb();
-    const docRef = doc(db, "accounts", normalizedCode);
-    let snap = await getDoc(docRef);
+    const snap = await getDocs(collection(db, "accounts"));
+    const normInput = normalizeVietnameseName(name);
 
-    // Auto-seed initial accounts if not present in Firestore
-    if (!snap.exists() && (normalizedCode === "1111" || normalizedCode === "ADMIN123")) {
-      const initialAccount = {
-        customerName: normalizedCode === "ADMIN123" ? "Admin Master" : "Tài khoản kiểm tra (1111)",
-        phone: "0989.982.818",
-        createdDate: getTodayString(),
-        expiryDate: "2099-12-31",
-        maxDevices: 8,
-        devices: [deviceId || "unknown_device"],
-        status: "active",
-        notes: "Tự động khởi tạo kiểm tra hệ thống"
-      };
-      await setDoc(docRef, initialAccount);
-      return {
-        success: true,
-        account: {
-          id: normalizedCode,
-          customerName: initialAccount.customerName,
-          phone: initialAccount.phone,
-          expiryDate: initialAccount.expiryDate,
-          maxDevices: initialAccount.maxDevices,
-          deviceCount: 1,
-          apiKeys: []
+    let localDeletedIds = new Set<string>();
+    try {
+      const rawDel = localStorage.getItem("khaothi_deleted_account_ids");
+      if (rawDel) {
+        const arr = JSON.parse(rawDel);
+        if (Array.isArray(arr)) arr.forEach((id) => localDeletedIds.add(String(id).toUpperCase()));
+      }
+    } catch {}
+
+    snap.forEach((d) => {
+      if (d.id === "__DELETED_REGISTRY__") {
+        const regData = d.data();
+        if (Array.isArray(regData.deletedIds)) {
+          regData.deletedIds.forEach((id: any) => localDeletedIds.add(String(id).toUpperCase()));
         }
-      };
+      }
+    });
+
+    let matchingDoc: any = null;
+    snap.forEach((d) => {
+      if (matchingDoc || d.id === "__DELETED_REGISTRY__") return;
+      const data = d.data();
+      if (data.isDeleted === true || localDeletedIds.has(d.id.toUpperCase())) return;
+      const normStored = normalizeVietnameseName(data.customerName || "");
+      const normUsername = normalizeVietnameseName(data.username || "");
+      const directMatch = (data.customerName || "").toLowerCase().trim() === name.toLowerCase().trim();
+      const usernameMatch = (data.username || "").toLowerCase().trim() === name.toLowerCase().trim();
+      const idMatch = d.id.toLowerCase().trim() === name.toLowerCase().trim();
+      if (
+        usernameMatch ||
+        directMatch ||
+        (normInput && normUsername && normInput === normUsername) ||
+        (normInput && normStored && normInput === normStored) ||
+        idMatch
+      ) {
+        matchingDoc = d;
+      }
+    });
+
+    // Admin bypass fallback
+    const isAdminUser = normInput === "admin" || normInput.includes("admin");
+    const isAdminPass = code.trim() === "123456" || code.trim().toUpperCase() === "ADMIN123" || code.trim() === "0989982818";
+    if (!matchingDoc && isAdminUser && isAdminPass) {
+      snap.forEach((d) => {
+        if (matchingDoc || d.id === "__DELETED_REGISTRY__") return;
+        const data = d.data();
+        if (data.isDeleted === true || localDeletedIds.has(d.id.toUpperCase())) return;
+        if ((data.customerName || "").toLowerCase().includes("admin") || d.id === "123456" || d.id === "ADMIN123") {
+          matchingDoc = d;
+        }
+      });
     }
 
-    if (snap.exists()) {
-      const acc = snap.data() as any;
-      const accId = snap.id;
+    if (matchingDoc) {
+      const acc = matchingDoc.data();
+      const accId = matchingDoc.id;
+
+      // Verify Password
+      const storedPass = (acc.password || accId || "").trim();
+      const passDirect = storedPass === code.trim();
+      const passCase = storedPass.toUpperCase() === code.trim().toUpperCase();
+      const passId = accId.toUpperCase() === code.trim().toUpperCase();
+      const passBypass = isAdminUser && isAdminPass;
+
+      if (!passDirect && !passCase && !passId && !passBypass) {
+        return {
+          success: false,
+          error: "Tên đăng nhập hoặc Mật khẩu không chính xác. Vui lòng kiểm tra lại thông tin hoặc liên hệ Quản trị viên."
+        };
+      }
 
       if (acc.status === "locked") {
         return {
           success: false,
-          error: `Tài khoản "${accId}" đã bị khóa. Vui lòng liên hệ Admin qua ĐT 0989.982.818 hoặc Zalo 0978.468.986 để mở khóa.`
+          error: `Tài khoản "${acc.customerName}" đang bị tạm khóa. Vui lòng liên hệ Quản trị viên để được hỗ trợ.`
         };
       }
 
-      const today = getTodayString();
-      if (acc.expiryDate && acc.expiryDate < today) {
-        return {
-          success: false,
-          error: `Tài khoản "${accId}" đã hết hạn vào ngày ${formatDateVN(acc.expiryDate)}. Vui lòng liên hệ Admin qua ĐT 0989.982.818 hoặc Zalo 0978.468.986 để gia hạn.`
-        };
-      }
+      const isLicensed = isAccountLicensed(acc.expiryDate);
+      const trialCount = Number(acc.trialCount) || 0;
+      const isTrialLocked = !isLicensed && trialCount >= 5;
 
       const devId = deviceId || "unknown_device";
       const devices = Array.isArray(acc.devices) ? acc.devices : [];
       const isRegistered = devices.includes(devId);
       const maxDevices = Number(acc.maxDevices) || 2;
 
+      const accountPayload = {
+        id: accId,
+        username: acc.username || accId,
+        customerName: acc.customerName,
+        phone: acc.phone,
+        notes: acc.notes || "",
+        avatar: acc.avatar || "",
+        expiryDate: acc.expiryDate || "",
+        isLicensed,
+        trialCount,
+        isTrialLocked,
+        maxDevices: maxDevices,
+        deviceCount: isRegistered ? devices.length : Math.min(devices.length + 1, maxDevices),
+        apiKeys: acc.apiKeys || []
+      };
+
       if (isRegistered) {
         return {
           success: true,
-          account: {
-            id: accId,
-            customerName: acc.customerName,
-            phone: acc.phone,
-            expiryDate: acc.expiryDate,
-            maxDevices: maxDevices,
-            deviceCount: devices.length,
-            apiKeys: acc.apiKeys || []
-          }
+          account: accountPayload
         };
       }
 
       if (devices.length < maxDevices) {
         const updatedDevices = [...devices, devId];
         try {
-          await updateDoc(docRef, { devices: updatedDevices });
+          await updateDoc(doc(db, "accounts", accId), { devices: updatedDevices });
         } catch (err) {
           console.warn("Could not update device to firestore:", err);
         }
+        accountPayload.deviceCount = updatedDevices.length;
         return {
           success: true,
-          account: {
-            id: accId,
-            customerName: acc.customerName,
-            phone: acc.phone,
-            expiryDate: acc.expiryDate,
-            maxDevices: maxDevices,
-            deviceCount: updatedDevices.length,
-            apiKeys: acc.apiKeys || []
-          }
+          account: accountPayload
         };
       }
 
       return {
         success: false,
-        error: `Mã tài khoản "${accId}" (${acc.customerName}) đã được kích hoạt trên đủ ${maxDevices} thiết bị. Vui lòng liên hệ Admin qua ĐT 0989.982.818 hoặc Zalo 0978.468.986 để giải phóng thiết bị cũ.`
+        error: `Tài khoản "${acc.customerName}" đã kích hoạt trên đủ ${maxDevices} thiết bị cho phép. Vui lòng liên hệ Quản trị viên để giải phóng thiết bị.`
       };
     }
   } catch (firestoreErr) {
-    console.warn("Direct Firestore auth check skipped, trying backend server...", firestoreErr);
-  }
-
-  // 2. Server API fallback if Firestore fails
-  try {
-    const res = await fetch("/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code: normalizedCode, deviceId }),
-    });
-
-    const contentType = res.headers.get("content-type") || "";
-    if (contentType.includes("application/json")) {
-      const data = await res.json();
-      return data;
-    }
-  } catch (serverErr) {
-    console.error("Server auth error:", serverErr);
+    console.error("Firestore auth check error:", firestoreErr);
   }
 
   return {
     success: false,
-    error: `Mã tài khoản "${normalizedCode}" không tồn tại trên hệ thống hoặc chưa được cấp phép. Vui lòng liên hệ Admin qua ĐT 0989.982.818 hoặc Zalo 0978.468.986 để được hỗ trợ.`
+    error: "Tên đăng nhập hoặc Mật khẩu không chính xác. Vui lòng kiểm tra lại thông tin hoặc liên hệ Quản trị viên."
   };
 }
 
 /**
  * Verify saved account in background
  */
-export async function clientVerify(code: string, deviceId: string): Promise<any> {
-  return clientLogin(code, deviceId);
+export async function clientVerify(code: string, deviceId: string, name?: string): Promise<any> {
+  return clientLogin(name || "", code, deviceId);
 }
 
 /**
- * Admin: Verify PIN (0989982818)
+ * Admin: Verify PIN (123456 or 0989982818)
  */
 export async function clientAdminVerifyPin(pin: string): Promise<boolean> {
-  if (pin.trim() === "0989982818") return true;
+  const clean = pin.trim();
+  if (clean === "123456" || clean === "0989982818") return true;
 
   try {
     const res = await fetch("/api/admin/verify-pin", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ adminKey: pin.trim() })
+      body: JSON.stringify({ adminKey: clean })
     });
     const data = await res.json();
     return Boolean(data.success);
   } catch {
-    return pin.trim() === "0989982818";
+    return clean === "123456" || clean === "0989982818";
   }
 }
 
 /**
- * Admin: Get All Accounts (Dual Layer)
+ * Admin: Get All Accounts (Dual Layer, filtered from deleted blacklist)
  */
 export async function clientAdminGetAccounts(pin: string): Promise<any[]> {
+  const getDeletedSet = () => {
+    try {
+      const raw = localStorage.getItem("khaothi_deleted_account_ids");
+      if (raw) return new Set<string>(JSON.parse(raw).map((s: string) => String(s).toUpperCase()));
+    } catch {}
+    return new Set<string>();
+  };
+
+  const deletedSet = getDeletedSet();
+  let accounts: any[] = [];
+
   try {
     const res = await fetch("/api/admin/accounts/list", {
       method: "POST",
@@ -229,23 +321,34 @@ export async function clientAdminGetAccounts(pin: string): Promise<any[]> {
     });
     const data = await res.json();
     if (data.success && Array.isArray(data.accounts)) {
-      return data.accounts;
+      accounts = data.accounts;
     }
   } catch {}
 
   // Fallback to direct Firestore
-  try {
-    const db = getClientDb();
-    const snap = await getDocs(collection(db, "accounts"));
-    const list: any[] = [];
-    snap.forEach((d) => {
-      list.push({ id: d.id, ...d.data() });
-    });
-    return list;
-  } catch (err) {
-    console.error("Firestore get accounts error:", err);
-    return [];
+  if (accounts.length === 0) {
+    try {
+      const db = getClientDb();
+      const snap = await getDocs(collection(db, "accounts"));
+      snap.forEach((d) => {
+        if (d.id === "__DELETED_REGISTRY__") {
+          const regData = d.data();
+          if (Array.isArray(regData.deletedIds)) {
+            regData.deletedIds.forEach((id: any) => deletedSet.add(String(id).toUpperCase()));
+          }
+          return;
+        }
+        accounts.push({ id: d.id, ...d.data() });
+      });
+    } catch (err) {
+      console.warn("Firestore get accounts fallback warning:", err);
+    }
   }
+
+  return accounts.filter((a: any) => {
+    const idUpper = (a.id || "").toUpperCase();
+    return idUpper !== "__DELETED_REGISTRY__" && !deletedSet.has(idUpper) && !a.isDeleted;
+  });
 }
 
 /**
@@ -255,11 +358,14 @@ export async function clientAdminCreateAccount(
   pin: string,
   accountData: {
     id?: string;
+    username?: string;
     customerName: string;
     phone: string;
     expiryDate: string;
     maxDevices: number;
     notes?: string;
+    password?: string;
+    avatar?: string;
   }
 ): Promise<{ success: boolean; account?: any; error?: string }> {
   // 1. Try Server
@@ -271,16 +377,23 @@ export async function clientAdminCreateAccount(
     });
     const data = await res.json();
     if (data && data.success) return data;
+    if (data && data.error) return { success: false, error: data.error };
   } catch {}
 
   // 2. Direct Firestore fallback
   try {
     const db = getClientDb();
-    let id = accountData.id ? accountData.id.trim().toUpperCase() : `TK-${Math.floor(1000 + Math.random() * 9000)}`;
+    const cleanPassword = (accountData.password || accountData.id || "123456").trim();
+    let id = accountData.id && accountData.id.trim() !== cleanPassword
+      ? accountData.id.trim().toUpperCase()
+      : `TK-${Math.floor(100000 + Math.random() * 900000)}`;
     const docRef = doc(db, "accounts", id);
     const newAccount = {
+      username: (accountData.username || id.toLowerCase()).trim(),
       customerName: accountData.customerName,
+      password: cleanPassword,
       phone: accountData.phone,
+      avatar: accountData.avatar || "",
       createdDate: getTodayString(),
       expiryDate: accountData.expiryDate,
       maxDevices: accountData.maxDevices || 2,
@@ -299,20 +412,45 @@ export async function clientAdminCreateAccount(
  * Admin: Delete Account
  */
 export async function clientAdminDeleteAccount(pin: string, id: string): Promise<boolean> {
+  const normId = id.trim().toUpperCase();
+
+  // Save to client-side deleted blacklist permanently
   try {
-    await fetch("/api/admin/accounts/delete", {
+    const existingRaw = localStorage.getItem("khaothi_deleted_account_ids");
+    const set = existingRaw ? new Set(JSON.parse(existingRaw)) : new Set<string>();
+    set.add(normId);
+    set.add(id.trim());
+    localStorage.setItem("khaothi_deleted_account_ids", JSON.stringify(Array.from(set)));
+  } catch {}
+
+  let serverOk = false;
+  try {
+    const res = await fetch("/api/admin/accounts/delete", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ adminKey: pin, id })
     });
+    const d = await res.json();
+    if (d && d.success) serverOk = true;
   } catch {}
 
   try {
     const db = getClientDb();
-    await deleteDoc(doc(db, "accounts", id.toUpperCase()));
+    // Record tombstone in accounts/__DELETED_REGISTRY__
+    const regRef = doc(db, "accounts", "__DELETED_REGISTRY__");
+    const regSnap = await getDoc(regRef);
+    const existingIds: string[] = regSnap.exists() && Array.isArray(regSnap.data()?.deletedIds)
+      ? regSnap.data().deletedIds
+      : [];
+    const mergedIds = Array.from(new Set([...existingIds, normId]));
+    await setDoc(regRef, {
+      deletedIds: mergedIds,
+      updatedAt: new Date().toISOString()
+    }, { merge: true });
+    await deleteDoc(doc(db, "accounts", normId));
     return true;
   } catch {
-    return false;
+    return serverOk;
   }
 }
 
@@ -466,14 +604,16 @@ export async function clientAdminUpdateKeys(
 }
 
 /**
- * User: Update Profile / Display Name
+ * User: Update Profile / Display Name / Avatar
  */
 export async function clientUpdateProfile(
   code: string,
   deviceId: string,
   customerName: string,
   phone?: string,
-  notes?: string
+  notes?: string,
+  avatar?: string,
+  username?: string
 ): Promise<{ success: boolean; account?: any; error?: string }> {
   const cleanName = customerName.trim();
   if (!cleanName) {
@@ -488,14 +628,17 @@ export async function clientUpdateProfile(
       body: JSON.stringify({
         code: code.trim(),
         deviceId,
+        username: username !== undefined ? username.trim() : undefined,
         customerName: cleanName,
         phone: phone ? phone.trim() : undefined,
-        notes: notes ? notes.trim() : undefined
+        notes: notes ? notes.trim() : undefined,
+        avatar: avatar !== undefined ? avatar : undefined
       })
     });
     const data = await res.json();
     if (data && data.success && data.account) {
       localStorage.setItem("khaothi_account_data", JSON.stringify(data.account));
+      if (avatar) localStorage.setItem("khaothi_account_avatar", avatar);
       return data;
     }
   } catch {}
@@ -503,16 +646,24 @@ export async function clientUpdateProfile(
   // 2. Direct Firestore fallback
   try {
     const db = getClientDb();
-    const docRef = doc(db, "accounts", code.trim().toUpperCase());
+    let docRef = doc(db, "accounts", code.trim());
+    let snap = await getDoc(docRef);
+    if (!snap.exists()) {
+      docRef = doc(db, "accounts", code.trim().toUpperCase());
+      snap = await getDoc(docRef);
+    }
     const updatePayload: any = { customerName: cleanName };
+    if (username !== undefined && username.trim()) updatePayload.username = username.trim();
     if (phone !== undefined) updatePayload.phone = phone.trim();
     if (notes !== undefined) updatePayload.notes = notes.trim();
+    if (avatar !== undefined) updatePayload.avatar = avatar;
 
-    await updateDoc(docRef, updatePayload);
-    const snap = await getDoc(docRef);
     if (snap.exists()) {
-      const updatedAccount = { id: snap.id, ...snap.data() };
+      await updateDoc(docRef, updatePayload);
+      const updatedSnap = await getDoc(docRef);
+      const updatedAccount = { id: updatedSnap.id, ...updatedSnap.data() };
       localStorage.setItem("khaothi_account_data", JSON.stringify(updatedAccount));
+      if (avatar) localStorage.setItem("khaothi_account_avatar", avatar);
       return { success: true, account: updatedAccount };
     }
   } catch (err: any) {
@@ -521,5 +672,200 @@ export async function clientUpdateProfile(
 
   return { success: false, error: "Không thể cập nhật tên hiển thị." };
 }
+
+/**
+ * Admin: Change Password / Account Code
+ */
+export async function clientAdminChangePassword(
+  pin: string,
+  id: string,
+  newPassword: string
+): Promise<{ success: boolean; account?: any; error?: string }> {
+  // 1. Try server
+  try {
+    const res = await fetch("/api/admin/accounts/change-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ adminKey: pin, id, newPassword })
+    });
+    const data = await res.json();
+    if (data && data.success) return data;
+  } catch {}
+
+  // 2. Direct Firestore
+  try {
+    const db = getClientDb();
+    const cleanPass = newPassword.trim();
+    const normalizedId = id.toUpperCase();
+    let docRef = doc(db, "accounts", normalizedId);
+    let snap = await getDoc(docRef);
+    if (!snap.exists()) {
+      docRef = doc(db, "accounts", id.trim());
+      snap = await getDoc(docRef);
+    }
+    if (!snap.exists()) return { success: false, error: "Không tìm thấy tài khoản" };
+
+    const data = snap.data();
+    await updateDoc(docRef, { password: cleanPass });
+    return { success: true, account: { id: snap.id, ...data, password: cleanPass } };
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Lỗi đổi mật khẩu." };
+  }
+}
+
+/**
+ * Admin: Quick Renew "1 Year + 1 Day"
+ */
+export async function clientAdminQuickRenew1Year1Day(
+  pin: string,
+  id: string
+): Promise<{ success: boolean; account?: any; error?: string }> {
+  // 1. Try server
+  try {
+    const res = await fetch("/api/admin/accounts/quick-renew-1yr-1day", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ adminKey: pin, id })
+    });
+    const data = await res.json();
+    if (data && data.success) return data;
+  } catch {}
+
+  // 2. Direct Firestore
+  try {
+    const db = getClientDb();
+    const docRef = doc(db, "accounts", id.toUpperCase());
+    const snap = await getDoc(docRef);
+    if (!snap.exists()) return { success: false, error: "Không tìm thấy tài khoản" };
+
+    const acc = snap.data();
+    const today = getTodayString();
+    let baseDate = new Date();
+
+    if (acc.expiryDate && acc.expiryDate >= today && acc.expiryDate !== "2099-12-31") {
+      const parts = acc.expiryDate.split("-");
+      if (parts.length === 3) {
+        baseDate = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+      }
+    }
+
+    baseDate.setFullYear(baseDate.getFullYear() + 1);
+    baseDate.setDate(baseDate.getDate() + 1);
+
+    const y = baseDate.getFullYear();
+    const m = String(baseDate.getMonth() + 1).padStart(2, "0");
+    const d = String(baseDate.getDate()).padStart(2, "0");
+    const newExpiry = `${y}-${m}-${d}`;
+
+    await updateDoc(docRef, { expiryDate: newExpiry, status: "active" });
+    return { success: true, account: { id: snap.id, ...acc, expiryDate: newExpiry, status: "active" } };
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Lỗi cấp ngày sử dụng." };
+  }
+}
+
+/**
+ * Admin: Set Arbitrary Expiry Date
+ */
+export async function clientAdminSetExpiry(
+  pin: string,
+  id: string,
+  expiryDate: string
+): Promise<{ success: boolean; account?: any; error?: string }> {
+  // 1. Try server
+  try {
+    const res = await fetch("/api/admin/accounts/set-expiry", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ adminKey: pin, id, expiryDate })
+    });
+    const data = await res.json();
+    if (data && data.success) return data;
+  } catch {}
+
+  // 2. Direct Firestore
+  try {
+    const db = getClientDb();
+    const docRef = doc(db, "accounts", id.toUpperCase());
+    await updateDoc(docRef, { expiryDate: expiryDate.trim(), status: "active" });
+    const snap = await getDoc(docRef);
+    return { success: true, account: { id: snap.id, ...snap.data() } };
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Lỗi lưu ngày hết hạn." };
+  }
+}
+
+/**
+ * Admin: Reset Trial generation counter to 0
+ */
+export async function clientAdminResetTrial(
+  pin: string,
+  id: string
+): Promise<{ success: boolean; account?: any; error?: string }> {
+  // 1. Try server
+  try {
+    const res = await fetch("/api/admin/accounts/reset-trial", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ adminKey: pin, id })
+    });
+    const data = await res.json();
+    if (data && data.success) return data;
+  } catch {}
+
+  // 2. Direct Firestore
+  try {
+    const db = getClientDb();
+    const docRef = doc(db, "accounts", id.toUpperCase());
+    await updateDoc(docRef, { trialCount: 0 });
+    const snap = await getDoc(docRef);
+    return { success: true, account: { id: snap.id, ...snap.data(), trialCount: 0 } };
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Lỗi đặt lại lượt dùng thử." };
+  }
+}
+
+/**
+ * Record generation usage (increments trial count if not licensed)
+ */
+export async function clientRecordGeneration(
+  code: string
+): Promise<{ success: boolean; trialCount?: number; isLicensed?: boolean; isTrialLocked?: boolean }> {
+  if (!code) return { success: false };
+
+  // 1. Try server
+  try {
+    const res = await fetch("/api/account/record-generation", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code })
+    });
+    const data = await res.json();
+    if (data && data.success) return data;
+  } catch {}
+
+  // 2. Direct Firestore
+  try {
+    const db = getClientDb();
+    const docRef = doc(db, "accounts", code.toUpperCase());
+    const snap = await getDoc(docRef);
+    if (!snap.exists()) return { success: false };
+
+    const data = snap.data();
+    const isLicensed = isAccountLicensed(data.expiryDate);
+    if (isLicensed) {
+      return { success: true, isLicensed: true, trialCount: data.trialCount || 0, isTrialLocked: false };
+    }
+
+    const currentCount = Number(data.trialCount) || 0;
+    const newCount = currentCount + 1;
+    await updateDoc(docRef, { trialCount: newCount });
+    return { success: true, isLicensed: false, trialCount: newCount, isTrialLocked: newCount >= 5 };
+  } catch (err) {
+    console.warn("Could not record generation usage:", err);
+    return { success: false };
+  }
+}
+
 
 

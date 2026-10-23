@@ -34,6 +34,17 @@
         "scopeConfig": { "type": "object" }
       },
       "required": ["name", "subject", "grade", "period"]
+    },
+    "DeletedAccount": {
+      "title": "DeletedAccount",
+      "description": "Permanent tombstone record for deleted user accounts",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "rawId": { "type": "string" },
+        "deletedAt": { "type": "string" }
+      },
+      "required": ["id", "deletedAt"]
     }
   },
   "firestore": {
@@ -44,6 +55,10 @@
     "/custom_ppct/{id}": {
       "schema": "CustomPpct",
       "description": "Curriculum planning records"
+    },
+    "/deleted_accounts/{id}": {
+      "schema": "DeletedAccount",
+      "description": "Permanent tombstones for deleted accounts"
     }
   }
 }

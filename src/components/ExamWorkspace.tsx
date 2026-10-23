@@ -26,6 +26,7 @@ import SpecificationView from "./SpecificationView";
 import ExamPaperView from "./ExamPaperView";
 import AnswerKeyView from "./AnswerKeyView";
 import { ScopeConfigData } from "./ScopeConfigModal";
+import { isAccountLicensed, formatDateVN } from "../lib/client-auth";
 
 interface ExamWorkspaceProps {
   generationStep?: number;
@@ -77,6 +78,8 @@ interface ExamWorkspaceProps {
   onToggleTfStatement?: (questionId: number, statementId: string) => void;
   onOpenQuestionEditor?: (questionId: number, questionType: "mcq" | "tf" | "applied" | "shortAnswer", questionData: any) => void;
   onOpenApiKeyModal?: () => void;
+  currentUser?: any;
+  onOpenLoginModal?: () => void;
 }
 
 export default function ExamWorkspace({
@@ -90,6 +93,8 @@ export default function ExamWorkspace({
   period,
   examFormat,
   scopeConfig,
+  currentUser,
+  onOpenLoginModal,
   examDateLocation,
   bghName,
   bghSignature,
@@ -829,15 +834,79 @@ export default function ExamWorkspace({
                 </div>
               </div>
 
-              <div className="pt-1 flex justify-center">
+              <div className="pt-2 flex flex-col items-center gap-3">
+                {/* Account Licensing & Trial Notice */}
+                {!currentUser ? (
+                  <div className="w-full max-w-lg bg-amber-50 border border-amber-200/80 rounded-xl p-3 text-center space-y-1.5 shadow-xs">
+                    <div className="text-xs font-bold text-amber-900 flex items-center justify-center gap-1.5">
+                      <Lock className="w-4 h-4 text-amber-600" />
+                      <span>Yêu cầu đăng nhập để tạo đề</span>
+                    </div>
+                    <p className="text-[11px] text-amber-700">
+                      Vui lòng đăng nhập đúng Tên tài khoản và Mật khẩu (Mã tài khoản) để khởi tạo đề kiểm tra (cho phép dùng thử 5 lần).
+                    </p>
+                    {onOpenLoginModal && (
+                      <button
+                        type="button"
+                        onClick={onOpenLoginModal}
+                        className="mt-1 px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-lg shadow-sm cursor-pointer transition-colors"
+                      >
+                        Đăng nhập ngay
+                      </button>
+                    )}
+                  </div>
+                ) : !isAccountLicensed(currentUser?.expiryDate) ? (
+                  (currentUser?.trialCount || 0) >= 5 ? (
+                    <div className="w-full max-w-lg bg-rose-50 border border-rose-200 rounded-xl p-3 text-center space-y-1.5 shadow-xs">
+                      <div className="text-xs font-bold text-rose-900 flex items-center justify-center gap-1.5">
+                        <Lock className="w-4 h-4 text-rose-600" />
+                        <span>Đã hết 5 lượt dùng thử (Khóa tính năng tạo đề)</span>
+                      </div>
+                      <p className="text-[11.5px] text-rose-700 leading-relaxed">
+                        Tài khoản <b>{currentUser.customerName}</b> đã dùng đủ <b>5/5</b> lượt soạn đề. Vui lòng liên hệ Admin (ĐT/Zalo <b>0989.982.818</b> hoặc mã Quản trị <b>123456</b>) để được cấp bản quyền thời gian sử dụng theo năm.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="w-full max-w-lg bg-blue-50 border border-blue-200 rounded-xl px-3.5 py-2 flex items-center justify-between text-xs text-blue-900 shadow-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-blue-600 animate-pulse"></span>
+                        <span>Chế độ dùng thử: Đã soạn <strong>{currentUser?.trialCount || 0}/5</strong> lần</span>
+                      </div>
+                      <span className="font-bold text-blue-700 bg-blue-100/80 px-2 py-0.5 rounded-md text-[11px]">
+                        Còn {Math.max(0, 5 - (currentUser?.trialCount || 0))} lượt
+                      </span>
+                    </div>
+                  )
+                ) : (
+                  <div className="w-full max-w-lg bg-emerald-50 border border-emerald-200 rounded-xl px-3.5 py-2 flex items-center justify-between text-xs text-emerald-900 shadow-xs">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm">👑</span>
+                      <span>Bản quyền đầy đủ đến <strong>{formatDateVN(currentUser?.expiryDate)}</strong></span>
+                    </div>
+                    <span className="font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-md text-[11px]">
+                      Không giới hạn
+                    </span>
+                  </div>
+                )}
+
                 <button
                   type="button"
                   onClick={onGenerate}
-                  disabled={isLoading}
-                  className="inline-flex items-center justify-center gap-2.5 px-8 py-3 bg-blue-600 hover:bg-blue-500 active:scale-98 text-white text-sm font-bold rounded-xl shadow-xl hover:shadow-blue-600/30 transition-all cursor-pointer"
+                  disabled={isLoading || !currentUser || (!isAccountLicensed(currentUser?.expiryDate) && (currentUser?.trialCount || 0) >= 5)}
+                  className={`inline-flex items-center justify-center gap-2.5 px-8 py-3 text-white text-sm font-bold rounded-xl shadow-xl transition-all ${
+                    !currentUser || (!isAccountLicensed(currentUser?.expiryDate) && (currentUser?.trialCount || 0) >= 5)
+                      ? "bg-slate-400 cursor-not-allowed opacity-75"
+                      : "bg-blue-600 hover:bg-blue-500 active:scale-98 hover:shadow-blue-600/30 cursor-pointer"
+                  }`}
                 >
                   <Sparkles className="w-5 h-5" />
-                  <span>⚡ Khởi tạo Ma trận & Bảng đặc tả</span>
+                  <span>
+                    {!currentUser
+                      ? "Đăng nhập để tạo đề"
+                      : !isAccountLicensed(currentUser?.expiryDate) && (currentUser?.trialCount || 0) >= 5
+                      ? "🔒 Đã hết lượt dùng thử (Khóa tạo đề)"
+                      : "⚡ Khởi tạo Ma trận & Bảng đặc tả"}
+                  </span>
                   <ArrowRight className="w-5 h-5" />
                 </button>
               </div>

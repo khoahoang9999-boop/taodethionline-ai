@@ -30,16 +30,40 @@ export interface ApiKeyItem {
 }
 
 export interface Account {
-  id: string; // Mã tài khoản
-  customerName: string;
+  id: string; // Mã tài khoản duy nhất (VD: TK-102948 hoặc ADMIN123)
+  username?: string; // Tên đăng nhập riêng (VD: giaovien_toan, admin, cothao)
+  customerName: string; // Tên hiển thị / Họ tên người dùng
+  password?: string; // Mật khẩu (đồng bộ với id)
   phone: string;
+  avatar?: string; // Ảnh đại diện người dùng (URL hoặc Base64)
   createdDate: string;
-  expiryDate: string;
+  expiryDate: string; // "YYYY-MM-DD" hoặc "2099-12-31" hoặc "Chưa cấp"
+  trialCount?: number; // Số lượt tạo đề dùng thử đã sử dụng (tối đa 5 lượt)
   maxDevices: number;
   devices: string[];
   status: "active" | "locked";
   notes?: string;
   apiKeys?: ApiKeyItem[];
+  isDeleted?: boolean;
+}
+
+export function isAccountLicensed(expiryDate?: string): boolean {
+  if (!expiryDate || !expiryDate.trim()) return false;
+  if (expiryDate === "Chưa cấp" || expiryDate === "chua-cap") return false;
+  if (expiryDate === "2099-12-31" || expiryDate === "vinh-vien" || expiryDate === "Vĩnh viễn") return true;
+  const today = getTodayString();
+  return expiryDate >= today;
+}
+
+export function normalizeVietnameseName(s: string): string {
+  if (!s) return "";
+  return s
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/[^a-z0-9]/g, "");
 }
 
 export function getTodayString(): string {
@@ -61,59 +85,137 @@ export function formatDateVN(dateStr?: string): string {
   return dateStr;
 }
 
+const DELETED_REGISTRY_DOC_ID = "__DELETED_REGISTRY__";
+const LOCAL_DELETED_FILE = path.join(process.cwd(), "server-data", "deleted_accounts.json");
+const TMP_DELETED_FILE = path.join("/tmp", "deleted_accounts.json");
+
+function readLocalDeletedIds(): string[] {
+  try {
+    if (fs.existsSync(LOCAL_DELETED_FILE)) {
+      const parsed = JSON.parse(fs.readFileSync(LOCAL_DELETED_FILE, "utf-8"));
+      if (Array.isArray(parsed)) return parsed.map(String);
+    }
+    if (fs.existsSync(TMP_DELETED_FILE)) {
+      const parsed = JSON.parse(fs.readFileSync(TMP_DELETED_FILE, "utf-8"));
+      if (Array.isArray(parsed)) return parsed.map(String);
+    }
+  } catch {}
+  return [];
+}
+
+function writeLocalDeletedIds(ids: string[]) {
+  const unique = Array.from(new Set(ids.map(s => String(s).trim().toUpperCase()).filter(Boolean)));
+  try {
+    const dir = path.dirname(LOCAL_DELETED_FILE);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(LOCAL_DELETED_FILE, JSON.stringify(unique, null, 2), "utf-8");
+  } catch {
+    try {
+      fs.writeFileSync(TMP_DELETED_FILE, JSON.stringify(unique, null, 2), "utf-8");
+    } catch {}
+  }
+}
+
+/**
+ * Get Set of all deleted account IDs to ensure deleted accounts never reappear.
+ * Uses `accounts/__DELETED_REGISTRY__` document and local disk file so it always has permission.
+ */
+export async function getDeletedAccountIds(): Promise<Set<string>> {
+  const set = new Set<string>(readLocalDeletedIds().map(s => s.toUpperCase()));
+  try {
+    const regSnap = await getDoc(doc(db, 'accounts', DELETED_REGISTRY_DOC_ID));
+    if (regSnap.exists()) {
+      const data = regSnap.data();
+      if (Array.isArray(data.deletedIds)) {
+        data.deletedIds.forEach((id: any) => {
+          if (id) set.add(String(id).trim().toUpperCase());
+        });
+      }
+    }
+  } catch {
+    // Ignore transient Firestore error and rely on local + document flags
+  }
+  return set;
+}
+
 let migrationRun = false;
 async function ensureMigrated() {
   if (migrationRun) return;
   migrationRun = true;
   
   try {
-    const snap = await getDocs(query(collection(db, 'accounts'), limit(1)));
-    if (!snap.empty) return; // Already has data, no migration needed
-    
-    let toMigrate: any[] = [];
-    const DATA_FILE = path.join(process.cwd(), "accounts.json");
-    const TMP_DATA_FILE = path.join("/tmp", "accounts.json");
-    
-    if (fs.existsSync(DATA_FILE)) {
-      toMigrate = JSON.parse(fs.readFileSync(DATA_FILE, "utf-8"));
-    } else if (fs.existsSync(TMP_DATA_FILE)) {
-      toMigrate = JSON.parse(fs.readFileSync(TMP_DATA_FILE, "utf-8"));
-    }
-    
-    if (Array.isArray(toMigrate) && toMigrate.length > 0) {
-      console.log("Migrating accounts from JSON to Firestore...");
-      const batch = writeBatch(db);
-      for (const acc of toMigrate) {
-        if (!acc.id) continue;
-        const { id, ...data } = acc;
-        batch.set(doc(db, 'accounts', id.toUpperCase()), data);
+    const deletedSet = await getDeletedAccountIds();
+
+    // 1. Ensure Master Admin account (admin / 123456) exists only if not deleted
+    if (!deletedSet.has('123456')) {
+      const adminDocRef = doc(db, 'accounts', '123456');
+      const adminSnap = await getDoc(adminDocRef);
+      if (!adminSnap.exists()) {
+        const SEED_ADMIN = {
+          username: "admin",
+          customerName: "Quản trị viên (Admin)",
+          password: "123456",
+          phone: "0989.982.818",
+          createdDate: getTodayString(),
+          expiryDate: "2099-12-31",
+          maxDevices: 999,
+          devices: [],
+          status: "active",
+          notes: "Tài khoản Quản trị viên (Admin)"
+        };
+        await setDoc(adminDocRef, SEED_ADMIN);
       }
-      await batch.commit();
-      console.log("Migration complete!");
-    } else {
-      console.log("No existing accounts found, creating master admin account.");
-      const SEED_ACCOUNT = {
-        customerName: "Hoàng Văn Đình Khoa (Admin Master)",
-        phone: "0989.982.818",
-        createdDate: getTodayString(),
-        expiryDate: "2099-12-31",
-        maxDevices: 999,
-        devices: [],
-        status: "active",
-        notes: "Tài khoản quản trị viên Master"
-      };
-      const SEED_TEST = {
-        customerName: "Tài khoản kiểm tra (1111)",
-        phone: "0989.982.818",
-        createdDate: getTodayString(),
-        expiryDate: "2099-12-31",
-        maxDevices: 999,
-        devices: [],
-        status: "active",
-        notes: "Mã tài khoản kiểm tra hệ thống"
-      };
-      await setDoc(doc(db, 'accounts', 'ADMIN123'), SEED_ACCOUNT);
-      await setDoc(doc(db, 'accounts', '1111'), SEED_TEST);
+    }
+
+    // 2. Ensure ADMIN123 account exists only if not deleted
+    if (!deletedSet.has('ADMIN123')) {
+      const admin123DocRef = doc(db, 'accounts', 'ADMIN123');
+      const admin123Snap = await getDoc(admin123DocRef);
+      if (!admin123Snap.exists()) {
+        const SEED_ACCOUNT = {
+          username: "admin123",
+          customerName: "Hoàng Văn Đình Khoa (Admin Master)",
+          password: "ADMIN123",
+          phone: "0989.982.818",
+          createdDate: getTodayString(),
+          expiryDate: "2099-12-31",
+          maxDevices: 999,
+          devices: [],
+          status: "active",
+          notes: "Tài khoản quản trị viên Master"
+        };
+        await setDoc(admin123DocRef, SEED_ACCOUNT);
+      }
+    }
+
+    // 3. Migrate from accounts.json if collection is empty
+    const snap = await getDocs(query(collection(db, 'accounts'), limit(1)));
+    if (snap.empty) {
+      let toMigrate: any[] = [];
+      const DATA_FILE = path.join(process.cwd(), "accounts.json");
+      const TMP_DATA_FILE = path.join("/tmp", "accounts.json");
+      
+      if (fs.existsSync(DATA_FILE)) {
+        toMigrate = JSON.parse(fs.readFileSync(DATA_FILE, "utf-8"));
+      } else if (fs.existsSync(TMP_DATA_FILE)) {
+        toMigrate = JSON.parse(fs.readFileSync(TMP_DATA_FILE, "utf-8"));
+      }
+      
+      if (Array.isArray(toMigrate) && toMigrate.length > 0) {
+        console.log("Migrating accounts from JSON to Firestore...");
+        const batch = writeBatch(db);
+        for (const acc of toMigrate) {
+          if (!acc.id) continue;
+          const upperId = acc.id.toUpperCase();
+          if (deletedSet.has(upperId)) continue; // Never resurrect deleted account
+          const { id, ...data } = acc;
+          batch.set(doc(db, 'accounts', upperId), data);
+        }
+        await batch.commit();
+        console.log("Migration complete!");
+      }
     }
   } catch (err) {
     console.error("Migration check failed:", err);
@@ -122,10 +224,17 @@ async function ensureMigrated() {
 
 export async function getAllAccounts(): Promise<Account[]> {
   await ensureMigrated();
+  const deletedSet = await getDeletedAccountIds();
   const snapshot = await getDocs(collection(db, 'accounts'));
   const accounts: Account[] = [];
   snapshot.forEach(doc => {
-    accounts.push({ id: doc.id, ...doc.data() } as Account);
+    if (doc.id === DELETED_REGISTRY_DOC_ID) return;
+    const data = doc.data();
+    const docId = doc.id.toUpperCase();
+    if (deletedSet.has(docId) || (data.id && deletedSet.has(String(data.id).toUpperCase())) || data.isDeleted) {
+      return; // Skip permanently deleted account!
+    }
+    accounts.push({ id: doc.id, ...data } as Account);
   });
   return accounts.sort((a, b) => {
     // Sort by createdDate DESC, then by id
@@ -138,67 +247,154 @@ export async function getAllAccounts(): Promise<Account[]> {
 export async function getAccountById(id: string): Promise<Account | undefined> {
   await ensureMigrated();
   const normalizedId = id.trim().toUpperCase();
+  if (normalizedId === DELETED_REGISTRY_DOC_ID) return undefined;
+  const deletedSet = await getDeletedAccountIds();
+  if (deletedSet.has(normalizedId)) {
+    return undefined;
+  }
   const docRef = doc(db, 'accounts', normalizedId);
   const docSnap = await getDoc(docRef);
   if (docSnap.exists()) {
-    return { id: docSnap.id, ...docSnap.data() } as Account;
+    const data = docSnap.data();
+    if (data.isDeleted) return undefined;
+    return { id: docSnap.id, ...data } as Account;
   }
   return undefined;
 }
 
 export async function createAccount(data: {
   id?: string;
-  customerName: string;
+  username?: string; // Tên đăng nhập riêng
+  customerName: string; // Tên hiển thị / Họ tên người dùng
   phone: string;
   expiryDate?: string;
   maxDevices?: number;
   notes?: string;
+  password?: string;
+  trialCount?: number;
+  avatar?: string;
 }): Promise<Account> {
   await ensureMigrated();
-  let code = data.id?.trim().toUpperCase();
-  if (!code) {
-    const randomNum = Math.floor(1000 + Math.random() * 9000);
-    code = `TK-TINHOC-${randomNum}`;
+
+  const usernameVal = (data.username || "").trim();
+  const customerNameVal = (data.customerName || data.username || "Khách hàng mới").trim();
+
+  // Check for duplicate username
+  const allAccs = await getAllAccounts();
+  if (usernameVal) {
+    const normNewUser = normalizeVietnameseName(usernameVal);
+    const duplicateUser = allAccs.find(acc => {
+      const accU = acc.username ? normalizeVietnameseName(acc.username) : "";
+      return accU === normNewUser || 
+             (acc.username && acc.username.toLowerCase().trim() === usernameVal.toLowerCase());
+    });
+    if (duplicateUser) {
+      throw new Error(`Tên đăng nhập "${usernameVal}" đã tồn tại trên hệ thống. Vui lòng chọn Tên đăng nhập khác.`);
+    }
   }
 
-  const docRef = doc(db, 'accounts', code);
-  const docSnap = await getDoc(docRef);
-  if (docSnap.exists()) {
-    throw new Error(`Mã tài khoản "${code}" đã tồn tại trong danh sách. Không thể tạo trùng mã!`);
+  const passwordVal = data.password ? data.password.trim() : (data.id ? data.id.trim() : "123456");
+
+  // Generate a guaranteed UNIQUE doc ID for this account (never collide with password or other accounts)
+  let code = data.id?.trim();
+  if (!code || code === passwordVal) {
+    const randomNum = Math.floor(100000 + Math.random() * 900000);
+    code = `TK-${randomNum}`;
+    let existingSnap = await getDoc(doc(db, 'accounts', code));
+    while (existingSnap.exists()) {
+      code = `TK-${Math.floor(100000 + Math.random() * 900000)}`;
+      existingSnap = await getDoc(doc(db, 'accounts', code));
+    }
+  } else {
+    // If explicit ID was given and differs from password, ensure no collision
+    let existingSnap = await getDoc(doc(db, 'accounts', code));
+    if (existingSnap.exists()) {
+      code = `${code}-${Math.floor(1000 + Math.random() * 9000)}`;
+    }
   }
 
   const newAccount: Omit<Account, "id"> = {
-    customerName: data.customerName || "Khách hàng mới",
+    username: usernameVal || code.toLowerCase(),
+    customerName: customerNameVal,
+    password: passwordVal,
     phone: data.phone || "",
+    avatar: data.avatar || "",
     createdDate: getTodayString(),
-    expiryDate: data.expiryDate || "2027-12-31",
+    expiryDate: data.expiryDate || "",
+    trialCount: data.trialCount || 0,
     maxDevices: Number(data.maxDevices) || 2,
     devices: [],
     status: "active",
     notes: data.notes || ""
   };
 
-  await setDoc(docRef, newAccount);
+  await setDoc(doc(db, 'accounts', code), newAccount);
   return { id: code, ...newAccount };
 }
 
 export async function deleteAccount(id: string): Promise<boolean> {
   await ensureMigrated();
   const normalizedId = id.trim().toUpperCase();
+
+  // 1. Record permanent tombstone in local file and accounts/__DELETED_REGISTRY__ so it NEVER shows up again
+  const currentDeleted = await getDeletedAccountIds();
+  currentDeleted.add(normalizedId);
+  currentDeleted.add(id.trim().toUpperCase());
+  const updatedDeletedList = Array.from(currentDeleted);
+  writeLocalDeletedIds(updatedDeletedList);
+
+  try {
+    await setDoc(doc(db, 'accounts', DELETED_REGISTRY_DOC_ID), {
+      deletedIds: updatedDeletedList,
+      updatedAt: new Date().toISOString()
+    }, { merge: true });
+  } catch {}
+
+  // 2. Delete from Firestore accounts collection
   const docRef = doc(db, 'accounts', normalizedId);
   const docSnap = await getDoc(docRef);
   if (docSnap.exists()) {
     await deleteDoc(docRef);
-    return true;
   }
-  return false;
+  if (id.trim() !== normalizedId) {
+    const docRefRaw = doc(db, 'accounts', id.trim());
+    const docSnapRaw = await getDoc(docRefRaw);
+    if (docSnapRaw.exists()) {
+      await deleteDoc(docRefRaw);
+    }
+  }
+
+  // 3. Remove from accounts.json files if present on disk
+  try {
+    const DATA_FILE = path.join(process.cwd(), "accounts.json");
+    const TMP_DATA_FILE = path.join("/tmp", "accounts.json");
+    for (const f of [DATA_FILE, TMP_DATA_FILE]) {
+      if (fs.existsSync(f)) {
+        const raw = fs.readFileSync(f, "utf-8");
+        const list = JSON.parse(raw);
+        if (Array.isArray(list)) {
+          const filtered = list.filter((a: any) => 
+            a.id?.toUpperCase() !== normalizedId && 
+            a.id?.trim() !== id.trim()
+          );
+          fs.writeFileSync(f, JSON.stringify(filtered, null, 2), "utf-8");
+        }
+      }
+    }
+  } catch {}
+
+  return true;
 }
 
 export async function resetDevices(id: string): Promise<Account | undefined> {
   await ensureMigrated();
   const normalizedId = id.trim().toUpperCase();
-  const docRef = doc(db, 'accounts', normalizedId);
-  const docSnap = await getDoc(docRef);
+  let docRef = doc(db, 'accounts', normalizedId);
+  let docSnap = await getDoc(docRef);
+  if (!docSnap.exists()) {
+    docRef = doc(db, 'accounts', id.trim());
+    docSnap = await getDoc(docRef);
+  }
   if (docSnap.exists()) {
     await updateDoc(docRef, { devices: [] });
     return { id: docSnap.id, ...docSnap.data(), devices: [] } as Account;
@@ -209,8 +405,12 @@ export async function resetDevices(id: string): Promise<Account | undefined> {
 export async function toggleAccountStatus(id: string): Promise<Account | undefined> {
   await ensureMigrated();
   const normalizedId = id.trim().toUpperCase();
-  const docRef = doc(db, 'accounts', normalizedId);
-  const docSnap = await getDoc(docRef);
+  let docRef = doc(db, 'accounts', normalizedId);
+  let docSnap = await getDoc(docRef);
+  if (!docSnap.exists()) {
+    docRef = doc(db, 'accounts', id.trim());
+    docSnap = await getDoc(docRef);
+  }
   if (docSnap.exists()) {
     const currentStatus = docSnap.data()?.status;
     const newStatus = currentStatus === "active" ? "locked" : "active";
@@ -218,6 +418,159 @@ export async function toggleAccountStatus(id: string): Promise<Account | undefin
     return { id: docSnap.id, ...docSnap.data(), status: newStatus } as Account;
   }
   return undefined;
+}
+
+/**
+ * Admin: Change Password for an account without changing document ID or blocking duplicate passwords.
+ */
+export async function adminChangePassword(id: string, newPass: string): Promise<Account | undefined> {
+  await ensureMigrated();
+  const cleanPass = newPass.trim();
+  if (!cleanPass) throw new Error("Mật khẩu mới không được để trống.");
+
+  const normalizedId = id.trim().toUpperCase();
+  let docRef = doc(db, 'accounts', normalizedId);
+  let snap = await getDoc(docRef);
+
+  if (!snap.exists()) {
+    docRef = doc(db, 'accounts', id.trim());
+    snap = await getDoc(docRef);
+  }
+
+  if (!snap.exists()) {
+    throw new Error(`Không tìm thấy tài khoản "${id}".`);
+  }
+
+  const currentData = snap.data() as Omit<Account, "id">;
+  await updateDoc(docRef, { password: cleanPass });
+  return { id: snap.id, ...currentData, password: cleanPass };
+}
+
+/**
+ * Admin: Quick Grant "1 Year + 1 Day"
+ * Cộng nhanh 1 năm và 1 ngày cho tài khoản, lập tức mở khóa và không bị giới hạn 5 lần dùng thử nữa.
+ */
+export async function adminQuickRenew1Year1Day(id: string): Promise<Account | undefined> {
+  await ensureMigrated();
+  const normalizedId = id.trim().toUpperCase();
+  const docRef = doc(db, 'accounts', normalizedId);
+  const docSnap = await getDoc(docRef);
+  if (!docSnap.exists()) {
+    throw new Error(`Không tìm thấy tài khoản "${normalizedId}".`);
+  }
+
+  const accData = docSnap.data() as Omit<Account, "id">;
+  const today = getTodayString();
+  let baseDate = new Date();
+
+  // If account has an active future date, add on top of it
+  if (accData.expiryDate && accData.expiryDate >= today && accData.expiryDate !== "2099-12-31") {
+    const parts = accData.expiryDate.split("-");
+    if (parts.length === 3) {
+      baseDate = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+    }
+  }
+
+  // Add 1 year and 1 day
+  baseDate.setFullYear(baseDate.getFullYear() + 1);
+  baseDate.setDate(baseDate.getDate() + 1);
+
+  const y = baseDate.getFullYear();
+  const m = String(baseDate.getMonth() + 1).padStart(2, "0");
+  const d = String(baseDate.getDate()).padStart(2, "0");
+  const newExpiry = `${y}-${m}-${d}`;
+
+  const updates: any = {
+    expiryDate: newExpiry,
+    status: "active"
+  };
+
+  await updateDoc(docRef, updates);
+  return { id: docSnap.id, ...accData, ...updates } as Account;
+}
+
+/**
+ * Admin: Set custom expiry date
+ */
+export async function adminSetExpiry(id: string, customExpiryDate: string): Promise<Account | undefined> {
+  await ensureMigrated();
+  const normalizedId = id.trim().toUpperCase();
+  const docRef = doc(db, 'accounts', normalizedId);
+  const docSnap = await getDoc(docRef);
+  if (!docSnap.exists()) {
+    throw new Error(`Không tìm thấy tài khoản "${normalizedId}".`);
+  }
+
+  const accData = docSnap.data() as Omit<Account, "id">;
+  const updates: any = {
+    expiryDate: customExpiryDate.trim(),
+    status: "active"
+  };
+
+  await updateDoc(docRef, updates);
+  return { id: docSnap.id, ...accData, ...updates } as Account;
+}
+
+/**
+ * Admin: Reset trial counter back to 0
+ */
+export async function adminResetTrial(id: string): Promise<Account | undefined> {
+  await ensureMigrated();
+  const normalizedId = id.trim().toUpperCase();
+  const docRef = doc(db, 'accounts', normalizedId);
+  const docSnap = await getDoc(docRef);
+  if (!docSnap.exists()) {
+    throw new Error(`Không tìm thấy tài khoản "${normalizedId}".`);
+  }
+
+  const accData = docSnap.data() as Omit<Account, "id">;
+  await updateDoc(docRef, { trialCount: 0 });
+  return { id: docSnap.id, ...accData, trialCount: 0 } as Account;
+}
+
+/**
+ * Increment trial generation count when an exam is created
+ */
+export async function recordGenerationUsage(code: string): Promise<{
+  success: boolean;
+  trialCount: number;
+  isLicensed: boolean;
+  isTrialLocked: boolean;
+}> {
+  await ensureMigrated();
+  if (!code) return { success: false, trialCount: 0, isLicensed: false, isTrialLocked: false };
+
+  const normalizedId = code.trim().toUpperCase();
+  const docRef = doc(db, 'accounts', normalizedId);
+  const docSnap = await getDoc(docRef);
+  if (!docSnap.exists()) {
+    return { success: false, trialCount: 0, isLicensed: false, isTrialLocked: false };
+  }
+
+  const accData = docSnap.data() as Omit<Account, "id">;
+  const isLicensed = isAccountLicensed(accData.expiryDate);
+
+  // If already licensed with active expiry, no trial counting needed
+  if (isLicensed) {
+    return {
+      success: true,
+      trialCount: accData.trialCount || 0,
+      isLicensed: true,
+      isTrialLocked: false
+    };
+  }
+
+  // If in trial mode, increment count
+  const currentCount = Number(accData.trialCount) || 0;
+  const newCount = currentCount + 1;
+  await updateDoc(docRef, { trialCount: newCount });
+
+  return {
+    success: true,
+    trialCount: newCount,
+    isLicensed: false,
+    isTrialLocked: newCount >= 5
+  };
 }
 
 export async function renewAccount(
@@ -270,16 +623,38 @@ export async function updateAccount(
 ): Promise<Account | undefined> {
   await ensureMigrated();
   const normalizedId = id.trim().toUpperCase();
-  const docRef = doc(db, 'accounts', normalizedId);
-  const docSnap = await getDoc(docRef);
+  let docRef = doc(db, 'accounts', normalizedId);
+  let docSnap = await getDoc(docRef);
+
+  if (!docSnap.exists()) {
+    docRef = doc(db, 'accounts', id.trim());
+    docSnap = await getDoc(docRef);
+  }
+
+  if (!docSnap.exists()) {
+    const all = await getAllAccounts();
+    const found = all.find(
+      a => a.id.toLowerCase() === id.toLowerCase() ||
+           a.customerName.toLowerCase() === id.toLowerCase()
+    );
+    if (found) {
+      docRef = doc(db, 'accounts', found.id);
+      docSnap = await getDoc(docRef);
+    }
+  }
+
   if (docSnap.exists()) {
     const dataToUpdate: any = {};
+    if (updateData.username !== undefined) dataToUpdate.username = updateData.username;
     if (updateData.customerName !== undefined) dataToUpdate.customerName = updateData.customerName;
     if (updateData.phone !== undefined) dataToUpdate.phone = updateData.phone;
     if (updateData.expiryDate !== undefined) dataToUpdate.expiryDate = updateData.expiryDate;
     if (updateData.maxDevices !== undefined) dataToUpdate.maxDevices = Number(updateData.maxDevices);
     if (updateData.notes !== undefined) dataToUpdate.notes = updateData.notes;
     if (updateData.apiKeys !== undefined) dataToUpdate.apiKeys = updateData.apiKeys;
+    if (updateData.trialCount !== undefined) dataToUpdate.trialCount = Number(updateData.trialCount);
+    if (updateData.password !== undefined) dataToUpdate.password = updateData.password;
+    if (updateData.avatar !== undefined) dataToUpdate.avatar = updateData.avatar;
     
     await updateDoc(docRef, dataToUpdate);
     return { id: docSnap.id, ...docSnap.data(), ...dataToUpdate } as Account;
@@ -287,87 +662,151 @@ export async function updateAccount(
   return undefined;
 }
 
-export async function authenticateUser(code: string, deviceId: string): Promise<any> {
+/**
+ * Authenticates user by requiring BOTH correct Username and Password (Code).
+ * Supports both signatures:
+ * - authenticateUser(name, code, deviceId)
+ * - authenticateUser(code, deviceId) [for legacy verify]
+ */
+export async function authenticateUser(
+  nameOrCode: string,
+  codeOrDeviceId?: string,
+  deviceIdArg?: string
+): Promise<any> {
   await ensureMigrated();
-  if (!code || !code.trim()) {
+
+  let name = "";
+  let password = "";
+  let deviceId = "";
+
+  if (deviceIdArg !== undefined) {
+    name = (nameOrCode || "").trim();
+    password = (codeOrDeviceId || "").trim();
+    deviceId = (deviceIdArg || "").trim();
+  } else {
+    // 2 arguments passed: authenticateUser(code, deviceId)
+    name = (nameOrCode || "").trim();
+    password = (nameOrCode || "").trim();
+    deviceId = (codeOrDeviceId || "").trim();
+  }
+
+  if (!name) {
+    return {
+      success: false,
+      code: "EMPTY_NAME",
+      error: "Vui lòng nhập Tên đăng nhập."
+    };
+  }
+
+  if (!password) {
     return {
       success: false,
       code: "EMPTY_CODE",
-      error: "Vui lòng nhập mã tài khoản được cấp."
+      error: "Vui lòng nhập Mật khẩu."
     };
   }
 
-  const normalizedCode = code.trim().toUpperCase();
-  const docRef = doc(db, 'accounts', normalizedCode);
-  const docSnap = await getDoc(docRef);
-  
-  if (!docSnap.exists()) {
+  const allAccounts = await getAllAccounts();
+  const normInput = normalizeVietnameseName(name);
+
+  // 1. Locate account by matching username, customerName, or account id
+  let targetAcc = allAccounts.find(acc => {
+    const userMatch = acc.username && acc.username.toLowerCase().trim() === name.toLowerCase().trim();
+    const normUser = acc.username ? normalizeVietnameseName(acc.username) : "";
+    const normStored = normalizeVietnameseName(acc.customerName);
+    const directNameMatch = acc.customerName.toLowerCase().trim() === name.toLowerCase().trim();
+    const idMatch = acc.id.toLowerCase().trim() === name.toLowerCase().trim();
+    return userMatch || (normUser && normInput === normUser) || directNameMatch || (normInput && normStored && normInput === normStored) || idMatch;
+  });
+
+  // Admin bypass
+  const isAdminUser = normInput === "admin" || normInput.includes("admin");
+  const isAdminPass = password === "123456" || password === "ADMIN123" || password === "0989982818";
+
+  if (!targetAcc && isAdminUser && isAdminPass) {
+    targetAcc = allAccounts.find(acc => acc.customerName.toLowerCase().includes("admin") || acc.id === "123456" || acc.id === "ADMIN123");
+  }
+
+  if (!targetAcc) {
     return {
       success: false,
       code: "NOT_FOUND",
-      error: `Mã tài khoản "${normalizedCode}" không tồn tại trên hệ thống (hoặc đã bị xóa). Vui lòng liên hệ Admin 0989.982.818 để được cấp lại.`
+      error: "Tên đăng nhập hoặc Mật khẩu không chính xác. Vui lòng kiểm tra lại thông tin hoặc liên hệ Quản trị viên."
     };
   }
 
-  const accData = docSnap.data() as Omit<Account, "id">;
-  const accId = docSnap.id;
+  // 2. Verify Password against this specific account
+  const storedPass = (targetAcc.password || targetAcc.id || "").trim();
+  const passDirectMatch = storedPass === password.trim();
+  const passCaseInsensitive = storedPass.toUpperCase() === password.trim().toUpperCase();
+  const passIdMatch = targetAcc.id.toUpperCase() === password.trim().toUpperCase();
+  const passAdminBypass = isAdminUser && isAdminPass;
+
+  if (!passDirectMatch && !passCaseInsensitive && !passIdMatch && !passAdminBypass) {
+    return {
+      success: false,
+      code: "PASSWORD_MISMATCH",
+      error: "Tên đăng nhập hoặc Mật khẩu không chính xác. Vui lòng kiểm tra lại thông tin hoặc liên hệ Quản trị viên."
+    };
+  }
+
+  const accData = targetAcc;
+  const accId = targetAcc.id;
+  const docRef = doc(db, 'accounts', accId);
 
   if (accData.status === "locked") {
     return {
       success: false,
       code: "LOCKED",
-      error: `Tài khoản "${accId}" đã bị khóa, không thể xuất file được! Vui lòng liên hệ Admin 0989.982.818 để được hỗ trợ mở khóa.`
+      error: `Tài khoản "${accData.customerName}" (${accId}) đang bị tạm khóa. Vui lòng liên hệ Quản trị viên để được hỗ trợ.`
     };
   }
 
-  const today = getTodayString();
-  if (accData.expiryDate && accData.expiryDate < today) {
-    return {
-      success: false,
-      code: "EXPIRED",
-      error: `Tài khoản "${accId}" đã hết hạn sử dụng vào ngày ${formatDateVN(accData.expiryDate)}. Vui lòng liên hệ Admin 0989.982.818 để gia hạn.`
-    };
-  }
+  const isLicensed = isAccountLicensed(accData.expiryDate);
+  const trialCount = Number(accData.trialCount) || 0;
+  const isTrialLocked = !isLicensed && trialCount >= 5;
 
   const devId = deviceId || "unknown_device";
   const devices = accData.devices || [];
   const isRegisteredDevice = devices.includes(devId);
 
+  const accountInfo = {
+    id: accId,
+    username: accData.username || accId,
+    customerName: accData.customerName,
+    password: accData.password || accId,
+    phone: accData.phone,
+    notes: accData.notes || "",
+    avatar: accData.avatar || "",
+    expiryDate: accData.expiryDate || "",
+    isLicensed,
+    trialCount,
+    isTrialLocked,
+    maxDevices: accData.maxDevices,
+    deviceCount: isRegisteredDevice ? devices.length : Math.min(devices.length + 1, accData.maxDevices),
+    apiKeys: accData.apiKeys || []
+  };
+
   if (isRegisteredDevice) {
     return {
       success: true,
-      account: {
-        id: accId,
-        customerName: accData.customerName,
-        phone: accData.phone,
-        expiryDate: accData.expiryDate,
-        maxDevices: accData.maxDevices,
-        deviceCount: devices.length,
-        apiKeys: accData.apiKeys || []
-      }
+      account: accountInfo
     };
   }
 
   if (devices.length < accData.maxDevices) {
     const newDevices = [...devices, devId];
     await updateDoc(docRef, { devices: newDevices });
+    accountInfo.deviceCount = newDevices.length;
     return {
       success: true,
-      account: {
-        id: accId,
-        customerName: accData.customerName,
-        phone: accData.phone,
-        expiryDate: accData.expiryDate,
-        maxDevices: accData.maxDevices,
-        deviceCount: newDevices.length,
-        apiKeys: accData.apiKeys || []
-      }
+      account: accountInfo
     };
   }
 
   return {
     success: false,
     code: "MAX_DEVICES",
-    error: `Rất tiếc! Mã tài khoản "${accId}" (${accData.customerName}) đã được kích hoạt trên đủ ${accData.maxDevices} thiết bị. Sang máy khác không sử dụng được!\n\nVui lòng liên hệ Admin 0989.982.818 hoặc Zalo 0978.468.986 để giải phóng máy cũ.`
+    error: `Tài khoản "${accData.customerName}" (${accId}) đã kích hoạt trên đủ ${accData.maxDevices} thiết bị cho phép. Vui lòng liên hệ Quản trị viên để giải phóng thiết bị.`
   };
 }

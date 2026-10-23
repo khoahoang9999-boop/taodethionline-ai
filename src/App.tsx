@@ -60,7 +60,7 @@ import ApiKeyModal, { ApiKeyItem } from "./components/ApiKeyModal";
 import UserProfileModal from "./components/UserProfileModal";
 import UserAvatarDropdown from "./components/UserAvatarDropdown";
 import { getDeviceId } from "./lib/device-id";
-import { clientVerify, clientAdminUpdateKeys } from "./lib/client-auth";
+import { clientVerify, clientAdminUpdateKeys, isAccountLicensed, clientRecordGeneration } from "./lib/client-auth";
 import { AppLogo } from "./components/AppLogo";
 import { TEXTBOOK_GRADE_6, TEXTBOOK_GRADE_7, TEXTBOOK_GRADE_8, TEXTBOOK_GRADE_9 } from "./data/textbooks";
 import { ALL_MATH_TEXTBOOKS } from "./data/math";
@@ -76,18 +76,6 @@ export default function App() {
     try {
       const raw = localStorage.getItem("khaothi_account_data");
       if (raw) return JSON.parse(raw);
-      const savedCode = localStorage.getItem("khaothi_account_code");
-      if (savedCode) {
-        const normalized = savedCode.trim().toUpperCase();
-        return {
-          id: normalized,
-          customerName: normalized === "ADMIN123" ? "Admin Master" : `Tài khoản (${normalized})`,
-          expiryDate: "2099-12-31",
-          maxDevices: normalized === "1111" ? 8 : 2,
-          devices: [],
-          status: "active"
-        };
-      }
       return null;
     } catch {
       return null;
@@ -197,54 +185,83 @@ export default function App() {
 
   const isAdmin = currentUser?.id?.trim().toUpperCase() === "TK-KHOA-2026" ||
     currentUser?.id?.trim().toUpperCase() === "ADMIN123" ||
+    currentUser?.id?.trim() === "123456" ||
+    currentUser?.username?.trim().toLowerCase() === "admin" ||
     currentUser?.notes?.toLowerCase()?.includes("admin") ||
     currentUser?.customerName?.toLowerCase()?.includes("admin");
 
-  // Sync userApiKeys with currentUser or local storage & clear key errors for Admin
+  const validUserApiKeys = (userApiKeys || []).filter((k) => k && typeof k.key === "string" && k.key.trim().length > 0);
+  const hasValidApiKey = isAdmin || validUserApiKeys.length > 0;
+
+  // Sync userApiKeys with currentUser or local storage & enforce API key modal if teacher has no key
   React.useEffect(() => {
-    if (currentUser?.apiKeys && Array.isArray(currentUser.apiKeys) && currentUser.apiKeys.length > 0) {
-      setUserApiKeys(currentUser.apiKeys);
-      localStorage.setItem("khaothi_user_api_keys", JSON.stringify(currentUser.apiKeys));
+    if (currentUser) {
+      if (Array.isArray(currentUser.apiKeys) && currentUser.apiKeys.length > 0) {
+        setUserApiKeys(currentUser.apiKeys);
+        localStorage.setItem("khaothi_user_api_keys", JSON.stringify(currentUser.apiKeys));
+      } else if (!isAdmin) {
+        // Check if teacher has any valid key in local state
+        const localValid = (userApiKeys || []).filter((k) => k && typeof k.key === "string" && k.key.trim().length > 0);
+        if (localValid.length === 0) {
+          setIsApiKeyModalOpen(true);
+        }
+      }
     }
-    // Admin account uses 3-mode keys automatically, immediately clear any key prompt status
     if (isAdmin) {
       setError("");
       setIsApiKeyModalOpen(false);
     }
-  }, [currentUser, isAdmin]);
+  }, [currentUser?.id, isAdmin]);
 
-  // Auto-verify saved session on mount
+  // Auto-verify saved session on mount and when tab regains focus
   React.useEffect(() => {
-    const savedCode = localStorage.getItem("khaothi_account_code");
-    if (savedCode) {
-      const devId = getDeviceId();
-      clientVerify(savedCode, devId)
-        .then((data) => {
-          if (data && data.success && data.account) {
-            setCurrentUser(data.account);
-            localStorage.setItem("khaothi_account_data", JSON.stringify(data.account));
-          } else {
-            setCurrentUser(null);
-            localStorage.removeItem("khaothi_account_code");
-            localStorage.removeItem("khaothi_account_data");
-          }
-        })
-        .catch(() => {});
-    }
+    const syncSession = () => {
+      const savedCode = localStorage.getItem("khaothi_account_code");
+      const savedName = localStorage.getItem("khaothi_account_username") || localStorage.getItem("khaothi_account_name") || "";
+      if (savedCode) {
+        const devId = getDeviceId();
+        clientVerify(savedCode, devId, savedName)
+          .then((data) => {
+            if (data && data.success && data.account) {
+              setCurrentUser(data.account);
+              localStorage.setItem("khaothi_account_data", JSON.stringify(data.account));
+            } else if (data && !data.success) {
+              setCurrentUser(null);
+              localStorage.removeItem("khaothi_account_code");
+              localStorage.removeItem("khaothi_account_data");
+            }
+          })
+          .catch(() => {});
+      }
+    };
+
+    syncSession();
+    window.addEventListener("focus", syncSession);
+    const interval = setInterval(syncSession, 20000);
+    return () => {
+      window.removeEventListener("focus", syncSession);
+      clearInterval(interval);
+    };
   }, []);
 
   const handleLogout = () => {
     setCurrentUser(null);
+    setUserApiKeys([]);
     localStorage.removeItem("khaothi_account_code");
+    localStorage.removeItem("khaothi_account_name");
+    localStorage.removeItem("khaothi_account_username");
+    localStorage.removeItem("khaothi_account_display_name");
     localStorage.removeItem("khaothi_account_data");
+    localStorage.removeItem("khaothi_user_api_keys");
   };
 
   const executeProtectedDownload = async (actionName: string, downloadFn: () => void) => {
     const savedCode = localStorage.getItem("khaothi_account_code");
+    const savedName = localStorage.getItem("khaothi_account_name") || "";
     if (savedCode) {
       const devId = getDeviceId();
       try {
-        const data = await clientVerify(savedCode, devId);
+        const data = await clientVerify(savedCode, devId, savedName);
         if (data && data.success && data.account) {
           setCurrentUser(data.account);
           localStorage.setItem("khaothi_account_data", JSON.stringify(data.account));
@@ -254,7 +271,7 @@ export default function App() {
           setCurrentUser(null);
           localStorage.removeItem("khaothi_account_code");
           localStorage.removeItem("khaothi_account_data");
-          console.log(data?.error || "Tài khoản của bạn đã bị xóa hoặc không còn hiệu lực. Trừ khi Admin tạo lại.");
+          console.log(data?.error || "Tài khoản của bạn đã bị xóa hoặc không còn hiệu lực.");
           setPendingDownloadAction({ name: actionName, fn: downloadFn });
           setIsLoginModalOpen(true);
           return;
@@ -598,6 +615,35 @@ export default function App() {
       setError("Cấu hình chưa được lưu. Vui lòng chuyển sang mục Cấu hình và nhấn 'Lưu cấu hình & Chuyển sang Tạo đề' để tiếp tục.");
       return;
     }
+
+    // Yêu cầu đăng nhập đúng Tên tài khoản và Mật khẩu (Mã tài khoản)
+    if (!currentUser) {
+      setPendingDownloadAction({
+        name: "Tạo Ma trận & Đề kiểm tra",
+        fn: () => handleGenerate()
+      });
+      setIsLoginModalOpen(true);
+      setError("Vui lòng đăng nhập đúng Tên tài khoản và Mật khẩu (Mã tài khoản) để sử dụng tính năng Tạo đề kiểm tra.");
+      return;
+    }
+
+    // Ép giáo viên người dùng phải tự nhập API Key nếu chưa có Key
+    if (!hasValidApiKey) {
+      setIsApiKeyModalOpen(true);
+      setError("⚠️ Bắt buộc nhập API Key: Quý Thầy/Cô chưa có Gemini API Key cá nhân. Vui lòng tự nhập API Key trong hộp thoại Cài đặt API Key để sử dụng tính năng tạo đề!");
+      return;
+    }
+
+    // Kiểm tra giới hạn dùng thử nếu chưa được cấp bản quyền theo năm
+    const isLicensed = isAccountLicensed(currentUser?.expiryDate);
+    if (!isLicensed) {
+      const trialCount = Number(currentUser?.trialCount) || 0;
+      if (trialCount >= 5) {
+        setError("🔒 Tài khoản của bạn đã sử dụng hết 5 lượt dùng thử soạn đề. Vui lòng liên hệ Quản trị viên (Admin qua ĐT 0989.982.818 hoặc Zalo 0978.468.986) để được cấp bản quyền thời gian sử dụng theo năm!");
+        return;
+      }
+    }
+
     setIsLoading(true);
     setError("");
     setTestData(null);
@@ -719,7 +765,24 @@ export default function App() {
 
       // BƯỚC 3 & 4: Biên soạn Đề kiểm tra & Đáp án theo từng phần
       setLoadingMessage(`Bước 3 & 4/4: Đang biên soạn Đề kiểm tra (Mã ${firstCode}) cùng Đáp án & Hướng dẫn chấm...`);
-      await handleGenerateSingleVariant(firstCode, combinedData);
+      const genSuccess = await handleGenerateSingleVariant(firstCode, combinedData);
+      if (genSuccess) {
+        // Ghi nhận lượt dùng thử nếu tài khoản chưa được cấp bản quyền theo năm
+        if (!isLicensed && currentUser?.id) {
+          const nextTrialCount = (Number(currentUser.trialCount) || 0) + 1;
+          const updatedUser = { ...currentUser, trialCount: nextTrialCount };
+          setCurrentUser(updatedUser);
+          try {
+            localStorage.setItem("khaothi_account_data", JSON.stringify(updatedUser));
+          } catch {}
+          clientRecordGeneration(currentUser.id).catch(() => {});
+          if (nextTrialCount >= 5) {
+            setSaveToast(`⚠️ Bạn đã hoàn thành lượt dùng thử thứ 5/5. Từ lần tạo đề tiếp theo, hệ thống sẽ khóa cho đến khi Admin cấp bản quyền theo năm.`);
+          } else {
+            setSaveToast(`✓ Đã tạo đề thành công! (Lượt dùng thử: ${nextTrialCount}/5. Còn ${5 - nextTrialCount} lượt)`);
+          }
+        }
+      }
       setActiveTab("all");
     } catch (err: any) {
       if (err.name === "AbortError") {
@@ -734,6 +797,30 @@ export default function App() {
 
   // Generate a single variant code using the existing matrix and specification part-by-part
   const handleGenerateSingleVariant = async (codeToGen: string, customBaseData?: any): Promise<boolean> => {
+    // Yêu cầu đăng nhập đúng Tên tài khoản và Mật khẩu (Mã tài khoản)
+    if (!currentUser) {
+      setIsLoginModalOpen(true);
+      setError("Vui lòng đăng nhập đúng Tên tài khoản và Mật khẩu (Mã tài khoản) để sử dụng tính năng Tạo đề kiểm tra.");
+      return false;
+    }
+
+    // Ép giáo viên người dùng phải tự nhập API Key nếu chưa có Key
+    if (!hasValidApiKey) {
+      setIsApiKeyModalOpen(true);
+      setError("⚠️ Bắt buộc nhập API Key: Quý Thầy/Cô chưa có Gemini API Key cá nhân. Vui lòng tự nhập API Key trong hộp thoại Cài đặt API Key để sử dụng tính năng tạo đề!");
+      return false;
+    }
+
+    // Kiểm tra giới hạn dùng thử nếu chưa được cấp bản quyền theo năm
+    const isLicensed = isAccountLicensed(currentUser?.expiryDate);
+    if (!isLicensed) {
+      const trialCount = Number(currentUser?.trialCount) || 0;
+      if (trialCount >= 5) {
+        setError("🔒 Tài khoản của bạn đã sử dụng hết 5 lượt dùng thử soạn đề. Vui lòng liên hệ Quản trị viên (Admin qua ĐT 0989.982.818 hoặc Zalo 0978.468.986) để được cấp bản quyền thời gian sử dụng theo năm!");
+        return false;
+      }
+    }
+
     const activeData = customBaseData || testData;
     if (!activeData || !activeData.matrix || !activeData.specification) {
       setError("Vui lòng tạo Khung ma trận và Bảng đặc tả trước.");
@@ -973,6 +1060,11 @@ export default function App() {
 
   const handleGenerateStudyGuide = async () => {
     executeProtectedDownload("Tạo và Tải File Đề Cương Ôn Tập", async () => {
+      if (!hasValidApiKey) {
+        setIsApiKeyModalOpen(true);
+        setError("⚠️ Bắt buộc nhập API Key: Quý Thầy/Cô chưa có Gemini API Key cá nhân. Vui lòng tự nhập API Key trong hộp thoại Cài đặt API Key để tạo đề cương!");
+        return;
+      }
       if (!testData || !testData.matrix) {
         setError("Vui lòng tạo đề thi trước khi tạo đề cương ôn tập.");
         return;
@@ -1236,6 +1328,28 @@ export default function App() {
         </div>
       )}
 
+      {/* Mandatory API Key Warning Bar for logged-in non-Admin teachers without a key */}
+      {currentUser && !hasValidApiKey && (
+        <div className="bg-amber-500 text-slate-950 px-4 py-1.5 text-xs font-bold flex items-center justify-between shadow-sm z-30 border-b border-amber-600/30">
+          <div className="flex items-center justify-between gap-3 max-w-6xl mx-auto w-full flex-wrap">
+            <div className="flex items-center gap-2">
+              <KeyRound className="w-4 h-4 text-slate-950 shrink-0" />
+              <span>
+                ⚠️ Tài khoản của Quý Thầy/Cô (<strong>{currentUser.customerName}</strong>) hiện chưa có Gemini API Key cá nhân. Vui lòng tự nhập API Key để sử dụng hệ thống!
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsApiKeyModalOpen(true)}
+              className="bg-slate-900 hover:bg-slate-800 text-amber-300 px-3 py-1 rounded-lg text-[11px] font-extrabold shadow-xs transition-all cursor-pointer shrink-0 flex items-center gap-1"
+            >
+              <KeyRound className="w-3 h-3" />
+              <span>Nhập API Key ngay</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Main Container: Home, Config, or Exam Workspace */}
       <div className="flex-1 overflow-hidden flex flex-col">
         {mainTab === "config" ? (
@@ -1322,6 +1436,7 @@ export default function App() {
               bghName={bghName}
               teacherHeadName={teacherHeadName}
               creatorName={creatorName}
+              onOpenApiKeyModal={() => setIsApiKeyModalOpen(true)}
             />
           </div>
         ) : mainTab === "accounts" ? (
@@ -1379,6 +1494,8 @@ export default function App() {
             onOpenQuestionEditor={handleOpenQuestionEditor}
             onOpenApiKeyModal={() => setIsApiKeyModalOpen(true)}
             onCancelGeneration={cancelGeneration}
+            currentUser={currentUser}
+            onOpenLoginModal={() => setIsLoginModalOpen(true)}
             />
         )}
       </div>
@@ -1576,10 +1693,28 @@ export default function App() {
         onLoginSuccess={(accData) => {
           setCurrentUser(accData);
           setError("");
-          setIsApiKeyModalOpen(false);
-          if (pendingDownloadAction?.fn) {
-            pendingDownloadAction.fn();
-            setPendingDownloadAction(null);
+          const accKeys = Array.isArray(accData?.apiKeys) ? accData.apiKeys.filter((k: any) => k && k.key && k.key.trim().length > 0) : [];
+          setUserApiKeys(accKeys);
+          localStorage.setItem("khaothi_user_api_keys", JSON.stringify(accKeys));
+
+          const loggedInIsAdmin =
+            accData?.id?.trim().toUpperCase() === "TK-KHOA-2026" ||
+            accData?.id?.trim().toUpperCase() === "ADMIN123" ||
+            accData?.id?.trim() === "123456" ||
+            accData?.username?.trim().toLowerCase() === "admin" ||
+            accData?.notes?.toLowerCase()?.includes("admin") ||
+            accData?.customerName?.toLowerCase()?.includes("admin");
+
+          if (!loggedInIsAdmin && accKeys.length === 0) {
+            setIsApiKeyModalOpen(true);
+            setSaveToast(`⚠️ Xin chào ${accData.customerName}! Tài khoản chưa có API Key, vui lòng tự nhập Gemini API Key cá nhân để bắt đầu.`);
+            setTimeout(() => setSaveToast(null), 5000);
+          } else {
+            setIsApiKeyModalOpen(false);
+            if (pendingDownloadAction?.fn) {
+              pendingDownloadAction.fn();
+              setPendingDownloadAction(null);
+            }
           }
         }}
       />
@@ -1592,7 +1727,12 @@ export default function App() {
         onUpdateSuccess={(updatedAccount) => {
           setCurrentUser(updatedAccount);
           localStorage.setItem("khaothi_account_data", JSON.stringify(updatedAccount));
-          setSaveToast(`Đã cập nhật tên hiển thị thành: "${updatedAccount.customerName}"`);
+          if (updatedAccount.avatar) {
+            localStorage.setItem("khaothi_account_avatar", updatedAccount.avatar);
+          } else {
+            localStorage.removeItem("khaothi_account_avatar");
+          }
+          setSaveToast(`✓ Đã cập nhật ảnh đại diện và hồ sơ: "${updatedAccount.customerName}"`);
           setTimeout(() => setSaveToast(null), 3500);
         }}
         onOpenApiKeyModal={() => setIsApiKeyModalOpen(true)}
@@ -1603,6 +1743,8 @@ export default function App() {
         isOpen={isApiKeyModalOpen}
         onClose={() => setIsApiKeyModalOpen(false)}
         accountName={currentUser?.customerName || currentUser?.id}
+        accountUsername={currentUser?.username || currentUser?.id}
+        requireKey={!isAdmin}
         apiKeys={userApiKeys}
         onOpenProfileModal={() => setIsProfileModalOpen(true)}
         onSave={async (newKeys) => {

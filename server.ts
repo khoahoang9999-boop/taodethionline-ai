@@ -17,7 +17,13 @@ import {
   toggleAccountStatus,
   updateAccount,
   renewAccount,
-  authenticateUser
+  authenticateUser,
+  adminChangePassword,
+  adminQuickRenew1Year1Day,
+  adminSetExpiry,
+  adminResetTrial,
+  recordGenerationUsage,
+  isAccountLicensed
 } from "./accounts-db";
 import {
   getAllCustomPpct,
@@ -69,24 +75,44 @@ async function getApiKeyPool(
     }
   }
 
-  // 2. Add keys registered to user's account code if provided
+  // 2. Add keys registered to user's account code if provided, and check if Admin
+  let isUserAdmin = false;
   if (userCode) {
+    const cleanCode = userCode.trim().toUpperCase();
+    if (cleanCode === "123456" || cleanCode === "ADMIN123" || cleanCode === "TK-KHOA-2026") {
+      isUserAdmin = true;
+    }
     const acc = await getAccountById(userCode);
-    if (acc && Array.isArray(acc.apiKeys)) {
-      for (const item of acc.apiKeys) {
-        if (item && typeof item.key === "string" && item.key.trim()) {
-          if (!pool.some((p) => p.key === item.key.trim())) {
-            pool.push({
-              key: item.key.trim(),
-              label: item.label?.trim() || `Tài khoản ${acc.id}`
-            });
+    if (acc) {
+      if (
+        acc.username?.toLowerCase() === "admin" ||
+        acc.customerName?.toLowerCase().includes("admin") ||
+        acc.notes?.toLowerCase().includes("admin")
+      ) {
+        isUserAdmin = true;
+      }
+      if (Array.isArray(acc.apiKeys)) {
+        for (const item of acc.apiKeys) {
+          if (item && typeof item.key === "string" && item.key.trim()) {
+            if (!pool.some((p) => p.key === item.key.trim())) {
+              pool.push({
+                key: item.key.trim(),
+                label: item.label?.trim() || `Tài khoản ${acc.id}`
+              });
+            }
           }
         }
       }
     }
   }
 
-  // 3. Fallback to server environment keys for all users as system baseline
+  // 3. Ép giáo viên người dùng phải tự nhập API Key nếu chưa có Key.
+  // Chỉ tài khoản Admin mới sử dụng System Key mặc định khi chưa nhập Key riêng.
+  if (!isUserAdmin && pool.length === 0) {
+    return [];
+  }
+
+  // Fallback to server environment keys for Admin or when teacher already provided keys and needs backup
   const envKeysRaw = [
     process.env.GEMINI_API_KEY,
     process.env.GEMINI_API_KEY_2,
@@ -98,7 +124,6 @@ async function getApiKeyPool(
   for (let i = 0; i < envKeysRaw.length; i++) {
     const raw = envKeysRaw[i];
     if (raw && typeof raw === "string" && raw.trim()) {
-      // Support comma-separated keys inside a single env var
       const parts = raw.split(",").map(k => k.trim()).filter(Boolean);
       for (const k of parts) {
         if (!pool.some((p) => p.key === k)) {
@@ -932,191 +957,270 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
-// Master Admin Secret Key
-const ADMIN_SECRET_KEY = "0989982818";
+// Master Admin Secret Key: support 123456 as requested, and 0989982818
+const ADMIN_SECRET_KEY = "123456";
+const isAuthorizedAdmin = (adminKey: any) => {
+  const k = String(adminKey || "").trim();
+  return k === "123456" || k === "0989982818";
+};
 
 // Public Endpoint: Login / Activate Account with device limit check
-  app.post("/api/auth/login", async (req, res) => {
-    try {
-      const { code, deviceId } = req.body;
-      const result = await authenticateUser(code, deviceId);
-      if (!result.success) {
-        return res.status(400).json(result);
-      }
-      return res.json(result);
-    } catch (err: any) {
-      return res.status(500).json({ success: false, error: err.message || "Lỗi hệ thống khi đăng nhập." });
+app.post("/api/auth/login", async (req, res) => {
+  try {
+    const { name, customerName, code, deviceId } = req.body;
+    const userName = (name || customerName || "").trim();
+    const result = await authenticateUser(userName, code, deviceId);
+    if (!result.success) {
+      return res.status(400).json(result);
     }
-  });
+    return res.json(result);
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message || "Lỗi hệ thống khi đăng nhập." });
+  }
+});
 
-  // Public Endpoint: Verify session / code
-  app.post("/api/auth/verify", async (req, res) => {
-    try {
-      const { code, deviceId } = req.body;
-      const result = await authenticateUser(code, deviceId);
-      return res.json(result);
-    } catch (err: any) {
-      return res.status(500).json({ success: false, error: err.message || "Lỗi hệ thống khi xác thực." });
-    }
-  });
+// Public Endpoint: Verify session / code
+app.post("/api/auth/verify", async (req, res) => {
+  try {
+    const { name, customerName, code, deviceId } = req.body;
+    const userName = (name || customerName || "").trim();
+    const result = await authenticateUser(userName, code, deviceId);
+    return res.json(result);
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message || "Lỗi hệ thống khi xác thực." });
+  }
+});
 
-  // Admin Endpoint: Verify Master Key / PIN
-  app.post("/api/admin/verify-pin", async (req, res) => {
-    const { adminKey } = req.body;
-    if (adminKey === ADMIN_SECRET_KEY) {
-      return res.json({ success: true });
-    }
-    return res.status(401).json({ success: false, error: "Mật khẩu Admin không chính xác. Vui lòng kiểm tra lại." });
-  });
+// Admin Endpoint: Verify Master Key / PIN (123456)
+app.post("/api/admin/verify-pin", async (req, res) => {
+  const { adminKey } = req.body;
+  if (isAuthorizedAdmin(adminKey)) {
+    return res.json({ success: true });
+  }
+  return res.status(401).json({ success: false, error: "Mật khẩu Admin không chính xác. Vui lòng kiểm tra lại." });
+});
 
-  // Admin Endpoint: Get All Accounts
-  app.post("/api/admin/accounts/list", async (req, res) => {
-    const { adminKey } = req.body;
-    if (adminKey !== ADMIN_SECRET_KEY) {
-      return res.status(401).json({ error: "Không có quyền truy cập Admin." });
-    }
-    const accounts = await getAllAccounts();
-    return res.json({ success: true, accounts });
-  });
+// Admin Endpoint: Get All Accounts
+app.post("/api/admin/accounts/list", async (req, res) => {
+  const { adminKey } = req.body;
+  if (!isAuthorizedAdmin(adminKey)) {
+    return res.status(401).json({ error: "Không có quyền truy cập Admin." });
+  }
+  const accounts = await getAllAccounts();
+  return res.json({ success: true, accounts });
+});
 
-  // Admin Endpoint: Create Account
-  app.post("/api/admin/accounts/create", async (req, res) => {
-    const { adminKey, id, customerName, phone, expiryDate, maxDevices, notes } = req.body;
-    if (adminKey !== ADMIN_SECRET_KEY) {
-      return res.status(401).json({ error: "Không có quyền truy cập Admin." });
-    }
-    try {
-      const account = await createAccount({ id, customerName, phone, expiryDate, maxDevices, notes });
-      return res.json({ success: true, account });
-    } catch (err: any) {
-      return res.status(400).json({ success: false, error: err.message });
-    }
-  });
+// Admin Endpoint: Create Account
+app.post("/api/admin/accounts/create", async (req, res) => {
+  const { adminKey, id, username, customerName, phone, expiryDate, maxDevices, notes, password, trialCount, avatar } = req.body;
+  if (!isAuthorizedAdmin(adminKey)) {
+    return res.status(401).json({ error: "Không có quyền truy cập Admin." });
+  }
+  try {
+    const account = await createAccount({ id, username, customerName, phone, expiryDate, maxDevices, notes, password, trialCount, avatar });
+    return res.json({ success: true, account });
+  } catch (err: any) {
+    return res.status(400).json({ success: false, error: err.message });
+  }
+});
 
-  // Admin Endpoint: Delete Account
-  app.post("/api/admin/accounts/delete", async (req, res) => {
-    const { adminKey, id } = req.body;
-    if (adminKey !== ADMIN_SECRET_KEY) {
-      return res.status(401).json({ error: "Không có quyền truy cập Admin." });
-    }
-    const ok = await deleteAccount(id);
-    if (ok) {
-      return res.json({ success: true });
-    }
-    return res.status(404).json({ success: false, error: "Không tìm thấy mã tài khoản để xóa." });
-  });
+// Admin Endpoint: Delete Account
+app.post("/api/admin/accounts/delete", async (req, res) => {
+  const { adminKey, id } = req.body;
+  if (!isAuthorizedAdmin(adminKey)) {
+    return res.status(401).json({ error: "Không có quyền truy cập Admin." });
+  }
+  const ok = await deleteAccount(id);
+  if (ok) {
+    return res.json({ success: true });
+  }
+  return res.status(404).json({ success: false, error: "Không tìm thấy mã tài khoản để xóa." });
+});
 
-  // Admin Endpoint: Reset Bound Devices (Giải phóng máy)
-  app.post("/api/admin/accounts/reset-devices", async (req, res) => {
-    const { adminKey, id } = req.body;
-    if (adminKey !== ADMIN_SECRET_KEY) {
-      return res.status(401).json({ error: "Không có quyền truy cập Admin." });
-    }
-    const account = await resetDevices(id);
-    if (account) {
-      return res.json({ success: true, account });
-    }
-    return res.status(404).json({ success: false, error: "Không tìm thấy tài khoản để giải phóng máy." });
-  });
+// Admin Endpoint: Reset Bound Devices (Giải phóng máy)
+app.post("/api/admin/accounts/reset-devices", async (req, res) => {
+  const { adminKey, id } = req.body;
+  if (!isAuthorizedAdmin(adminKey)) {
+    return res.status(401).json({ error: "Không có quyền truy cập Admin." });
+  }
+  const account = await resetDevices(id);
+  if (account) {
+    return res.json({ success: true, account });
+  }
+  return res.status(404).json({ success: false, error: "Không tìm thấy tài khoản để giải phóng máy." });
+});
 
-  // Admin Endpoint: Toggle Account Status (Lock/Active)
-  app.post("/api/admin/accounts/toggle-status", async (req, res) => {
-    const { adminKey, id } = req.body;
-    if (adminKey !== ADMIN_SECRET_KEY) {
-      return res.status(401).json({ error: "Không có quyền truy cập Admin." });
-    }
-    const account = await toggleAccountStatus(id);
-    if (account) {
-      return res.json({ success: true, account });
-    }
-    return res.status(404).json({ success: false, error: "Không tìm thấy tài khoản." });
-  });
+// Admin Endpoint: Toggle Account Status (Lock/Active)
+app.post("/api/admin/accounts/toggle-status", async (req, res) => {
+  const { adminKey, id } = req.body;
+  if (!isAuthorizedAdmin(adminKey)) {
+    return res.status(401).json({ error: "Không có quyền truy cập Admin." });
+  }
+  const account = await toggleAccountStatus(id);
+  if (account) {
+    return res.json({ success: true, account });
+  }
+  return res.status(404).json({ success: false, error: "Không tìm thấy tài khoản." });
+});
 
-  // User Endpoint: Update Display Name / Profile
-  app.post("/api/user/update-profile", async (req, res) => {
-    try {
-      const { code, deviceId, customerName, phone, notes } = req.body;
-      if (!code) {
-        return res.status(400).json({ success: false, error: "Thiếu mã tài khoản." });
-      }
-      if (!customerName || !customerName.trim()) {
-        return res.status(400).json({ success: false, error: "Tên hiển thị không được để trống." });
-      }
-      const authResult = await authenticateUser(code, deviceId);
-      if (!authResult.success || !authResult.account) {
-        return res.status(401).json({ success: false, error: authResult.error || "Tài khoản không hợp lệ hoặc chưa đăng nhập." });
-      }
-      const updatePayload: any = {
-        customerName: customerName.trim()
-      };
-      if (phone !== undefined) {
-        updatePayload.phone = phone.trim();
-      }
-      if (notes !== undefined) {
-        updatePayload.notes = notes.trim();
-      }
-      const updated = await updateAccount(authResult.account.id, updatePayload);
-      if (updated) {
-        return res.json({ success: true, account: updated });
-      }
-      return res.status(500).json({ success: false, error: "Không thể cập nhật thông tin tài khoản." });
-    } catch (err: any) {
-      return res.status(500).json({ success: false, error: err.message || "Lỗi cập nhật thông tin." });
-    }
-  });
+// Admin Endpoint: Change Password / Account Code
+app.post("/api/admin/accounts/change-password", async (req, res) => {
+  const { adminKey, id, newPassword } = req.body;
+  if (!isAuthorizedAdmin(adminKey)) {
+    return res.status(401).json({ error: "Không có quyền truy cập Admin." });
+  }
+  try {
+    const updated = await adminChangePassword(id, newPassword);
+    return res.json({ success: true, account: updated });
+  } catch (err: any) {
+    return res.status(400).json({ success: false, error: err.message });
+  }
+});
 
-  // User Endpoint: Save API Keys to Account (Permanent Storage)
-  app.post("/api/user/update-keys", async (req, res) => {
-    const { code, deviceId, apiKeys } = req.body;
-    const authResult = await authenticateUser(code, deviceId);
-    if (!authResult.success || !authResult.account) {
-      return res.status(401).json({ success: false, error: authResult.error || "Tài khoản không hợp lệ." });
-    }
-    const account = await updateAccount(authResult.account.id, { apiKeys });
-    if (account) {
-      return res.json({ success: true, apiKeys: account.apiKeys || [] });
-    }
-    return res.status(404).json({ success: false, error: "Không tìm thấy tài khoản để cập nhật Key." });
-  });
+// Admin Endpoint: Quick Renew "1 Year + 1 Day"
+app.post("/api/admin/accounts/quick-renew-1yr-1day", async (req, res) => {
+  const { adminKey, id } = req.body;
+  if (!isAuthorizedAdmin(adminKey)) {
+    return res.status(401).json({ error: "Không có quyền truy cập Admin." });
+  }
+  try {
+    const updated = await adminQuickRenew1Year1Day(id);
+    return res.json({ success: true, account: updated });
+  } catch (err: any) {
+    return res.status(400).json({ success: false, error: err.message });
+  }
+});
 
-  // Admin Endpoint: Update API Keys for Account
-  app.post("/api/admin/accounts/update-keys", async (req, res) => {
-    const { adminKey, id, apiKeys } = req.body;
-    if (adminKey !== ADMIN_SECRET_KEY) {
-      return res.status(401).json({ error: "Không có quyền truy cập Admin." });
-    }
-    const account = await updateAccount(id, { apiKeys });
-    if (account) {
-      return res.json({ success: true, account });
-    }
-    return res.status(404).json({ success: false, error: "Không tìm thấy tài khoản." });
-  });
+// Admin Endpoint: Set Arbitrary Expiry Date
+app.post("/api/admin/accounts/set-expiry", async (req, res) => {
+  const { adminKey, id, expiryDate } = req.body;
+  if (!isAuthorizedAdmin(adminKey)) {
+    return res.status(401).json({ error: "Không có quyền truy cập Admin." });
+  }
+  try {
+    const updated = await adminSetExpiry(id, expiryDate);
+    return res.json({ success: true, account: updated });
+  } catch (err: any) {
+    return res.status(400).json({ success: false, error: err.message });
+  }
+});
 
-  // Admin Endpoint: Update Account Details
-  app.post("/api/admin/accounts/update", async (req, res) => {
-    const { adminKey, id, updateData } = req.body;
-    if (adminKey !== ADMIN_SECRET_KEY) {
-      return res.status(401).json({ error: "Không có quyền truy cập Admin." });
-    }
-    const account = await updateAccount(id, updateData);
-    if (account) {
-      return res.json({ success: true, account });
-    }
-    return res.status(404).json({ success: false, error: "Không tìm thấy tài khoản để cập nhật." });
-  });
+// Admin Endpoint: Reset Trial Generation Counter to 0
+app.post("/api/admin/accounts/reset-trial", async (req, res) => {
+  const { adminKey, id } = req.body;
+  if (!isAuthorizedAdmin(adminKey)) {
+    return res.status(401).json({ error: "Không có quyền truy cập Admin." });
+  }
+  try {
+    const updated = await adminResetTrial(id);
+    return res.json({ success: true, account: updated });
+  } catch (err: any) {
+    return res.status(400).json({ success: false, error: err.message });
+  }
+});
 
-  // Admin Endpoint: Renew Account
-  app.post("/api/admin/accounts/renew", async (req, res) => {
-    const { adminKey, id, years, customExpiryDate } = req.body;
-    if (adminKey !== ADMIN_SECRET_KEY) {
-      return res.status(401).json({ error: "Không có quyền truy cập Admin." });
+// Public / User Endpoint: Record Generation Usage (for Trial limit tracking)
+app.post("/api/account/record-generation", async (req, res) => {
+  try {
+    const { code } = req.body;
+    if (!code) {
+      return res.status(400).json({ success: false, error: "Thiếu mã tài khoản." });
     }
-    const account = await renewAccount(id, years || 1, customExpiryDate);
-    if (account) {
-      return res.json({ success: true, account });
+    const usage = await recordGenerationUsage(code);
+    return res.json(usage);
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// User Endpoint: Update Display Name / Profile
+// User Endpoint: Update Display Name / Profile / Avatar
+app.post("/api/user/update-profile", async (req, res) => {
+  try {
+    const { code, deviceId, username, customerName, phone, notes, avatar } = req.body;
+    if (!code) {
+      return res.status(400).json({ success: false, error: "Thiếu mã tài khoản." });
     }
-    return res.status(404).json({ success: false, error: "Không tìm thấy tài khoản để gia hạn." });
-  });
+    if (!customerName || !customerName.trim()) {
+      return res.status(400).json({ success: false, error: "Tên hiển thị không được để trống." });
+    }
+    const updatePayload: any = {
+      customerName: customerName.trim()
+    };
+    if (username !== undefined && username.trim()) {
+      updatePayload.username = username.trim();
+    }
+    if (phone !== undefined) {
+      updatePayload.phone = phone.trim();
+    }
+    if (notes !== undefined) {
+      updatePayload.notes = notes.trim();
+    }
+    if (avatar !== undefined) {
+      updatePayload.avatar = avatar;
+    }
+    const updated = await updateAccount(code, updatePayload);
+    if (updated) {
+      return res.json({ success: true, account: updated });
+    }
+    return res.status(404).json({ success: false, error: "Không tìm thấy tài khoản cần cập nhật." });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message || "Lỗi cập nhật thông tin." });
+  }
+});
+
+// User Endpoint: Save API Keys to Account (Permanent Storage)
+app.post("/api/user/update-keys", async (req, res) => {
+  const { code, deviceId, apiKeys } = req.body;
+  const authResult = await authenticateUser(code, deviceId);
+  if (!authResult.success || !authResult.account) {
+    return res.status(401).json({ success: false, error: authResult.error || "Tài khoản không hợp lệ." });
+  }
+  const account = await updateAccount(authResult.account.id, { apiKeys });
+  if (account) {
+    return res.json({ success: true, apiKeys: account.apiKeys || [] });
+  }
+  return res.status(404).json({ success: false, error: "Không tìm thấy tài khoản để cập nhật Key." });
+});
+
+// Admin Endpoint: Update API Keys for Account
+app.post("/api/admin/accounts/update-keys", async (req, res) => {
+  const { adminKey, id, apiKeys } = req.body;
+  if (!isAuthorizedAdmin(adminKey)) {
+    return res.status(401).json({ error: "Không có quyền truy cập Admin." });
+  }
+  const account = await updateAccount(id, { apiKeys });
+  if (account) {
+    return res.json({ success: true, account });
+  }
+  return res.status(404).json({ success: false, error: "Không tìm thấy tài khoản." });
+});
+
+// Admin Endpoint: Update Account Details
+app.post("/api/admin/accounts/update", async (req, res) => {
+  const { adminKey, id, updateData } = req.body;
+  if (!isAuthorizedAdmin(adminKey)) {
+    return res.status(401).json({ error: "Không có quyền truy cập Admin." });
+  }
+  const account = await updateAccount(id, updateData);
+  if (account) {
+    return res.json({ success: true, account });
+  }
+  return res.status(404).json({ success: false, error: "Không tìm thấy tài khoản để cập nhật." });
+});
+
+// Admin Endpoint: Renew Account
+app.post("/api/admin/accounts/renew", async (req, res) => {
+  const { adminKey, id, years, customExpiryDate } = req.body;
+  if (!isAuthorizedAdmin(adminKey)) {
+    return res.status(401).json({ error: "Không có quyền truy cập Admin." });
+  }
+  const account = await renewAccount(id, years || 1, customExpiryDate);
+  if (account) {
+    return res.json({ success: true, account });
+  }
+  return res.status(404).json({ success: false, error: "Không tìm thấy tài khoản để gia hạn." });
+});
 
   // PPCT Endpoints: List saved PPCTs
   app.post("/api/ppct/list", async (req, res) => {
@@ -1508,9 +1612,41 @@ Hãy xuất kết quả DƯỚI DẠNG JSON duy nhất theo cấu trúc:
     return parsedData;
   }
 
+  // Account permission and trial enforcement helper
+  async function checkAccountPermission(userCode?: string): Promise<{ allowed: boolean; error?: string }> {
+    const code = (userCode || "").trim().toUpperCase();
+    if (!code) return { allowed: true };
+    if (code === "1111" || code === "ADMIN123" || code === "TK-KHOA-2026") {
+      return { allowed: true };
+    }
+    try {
+      const acc = await getAccountById(code);
+      if (acc) {
+        if (acc.status === "locked") {
+          return { allowed: false, error: `Tài khoản "${code}" (${acc.customerName}) đã bị khóa. Vui lòng liên hệ Admin.` };
+        }
+        const licensed = isAccountLicensed(acc.expiryDate);
+        if (!licensed) {
+          const count = Number(acc.trialCount) || 0;
+          if (count >= 5) {
+            return {
+              allowed: false,
+              error: "Tài khoản của bạn đã sử dụng hết 5 lượt dùng thử soạn đề. Vui lòng liên hệ Admin (0989.982.818 hoặc Quản trị viên 123456) để được cấp bản quyền theo năm!"
+            };
+          }
+        }
+      }
+    } catch {}
+    return { allowed: true };
+  }
+
   // API Route for generating Matrix standalone
   app.post("/api/generate-matrix", async (req, res) => {
     try {
+      const perm = await checkAccountPermission(req.body.userCode);
+      if (!perm.allowed) {
+        return res.status(403).json({ error: perm.error });
+      }
       const matrixData = await generateMatrixHelper(req.body);
       return res.json(matrixData);
     } catch (error: any) {
@@ -1522,6 +1658,10 @@ Hãy xuất kết quả DƯỚI DẠNG JSON duy nhất theo cấu trúc:
   // API Route for generating Specification standalone
   app.post("/api/generate-spec", async (req, res) => {
     try {
+      const perm = await checkAccountPermission(req.body.userCode);
+      if (!perm.allowed) {
+        return res.status(403).json({ error: perm.error });
+      }
       const specData = await generateSpecHelper(req.body);
       return res.json(specData);
     } catch (error: any) {
@@ -1533,6 +1673,10 @@ Hãy xuất kết quả DƯỚI DẠNG JSON duy nhất theo cấu trúc:
   // API Route for generating test (Matrix + Spec combined or partial)
   app.post("/api/generate-test", async (req, res) => {
     try {
+      const perm = await checkAccountPermission(req.body.userCode);
+      if (!perm.allowed) {
+        return res.status(403).json({ error: perm.error });
+      }
       const { part } = req.body;
       if (part === "matrix") {
         const matrixData = await generateMatrixHelper(req.body);
@@ -1756,6 +1900,11 @@ Hãy xuất kết quả DƯỚI DẠNG JSON duy nhất theo cấu trúc:
         return res.status(400).json({ error: "Thiếu dữ liệu Ma trận hoặc Đặc tả để tạo mã đề mới." });
       }
 
+      const perm = await checkAccountPermission(userCode);
+      if (!perm.allowed) {
+        return res.status(403).json({ error: perm.error });
+      }
+
       console.log(`Generating variant code ${examCode} (part: ${part || 'all'}) for Grade ${grade}, ${period}...`);
       const isMath = subject.toLowerCase().trim().includes("toán");
 
@@ -1964,6 +2113,11 @@ Chỉ trả về JSON thuần tuý khớp với schema ở trên, không kèm l�
         userApiKeys,
         userCode
       } = req.body;
+
+      const perm = await checkAccountPermission(userCode);
+      if (!perm.allowed) {
+        return res.status(403).json({ error: perm.error });
+      }
 
       console.log(`Generating Student Study Guide for ${subject} ${grade}, ${period} at ${schoolName}...`);
 

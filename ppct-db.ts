@@ -5,22 +5,22 @@ import path from 'path';
 import fs from 'fs';
 
 const fallbackConfig = {
-  projectId: "rare-badge-mhh41",
-  appId: "1:754399523784:web:d1caa174e2dba8031d46fd",
-  apiKey: "AIzaSyA0SjTDrIT-ck-rFZ8vfr7YDEEppzq_ngI",
-  authDomain: "rare-badge-mhh41.firebaseapp.com",
-  firestoreDatabaseId: "ai-studio-remixtokimtra168-5cfdad5b-1f57-4e8f-b230-705f8ed45eda",
-  storageBucket: "rare-badge-mhh41.firebasestorage.app",
-  messagingSenderId: "754399523784",
+  projectId: "gen-lang-client-0372527457",
+  appId: "1:322834438638:web:ac246430184ac7423fd6ff",
+  apiKey: "AIzaSyDpaU8wZ0oZBPn4cV5xF4Td68XCkUPbOcA",
+  authDomain: "gen-lang-client-0372527457.firebaseapp.com",
+  firestoreDatabaseId: "ai-studio-remixtokimtra178-eea5e342-e96f-47b5-9bae-cee722f798ff",
+  storageBucket: "gen-lang-client-0372527457.firebasestorage.app",
+  messagingSenderId: "322834438638",
   measurementId: "",
-  oAuthClientId: "754399523784-cgrmjhhjppelctas081dp4nrf74tfmea.apps.googleusercontent.com",
+  oAuthClientId: "322834438638-rto8fhg7vgj6sm5lglquu7em2tlnafps.apps.googleusercontent.com",
   recaptchaSiteKey: ""
 };
 
 const firebaseConfig = (firebaseConfigRaw && (firebaseConfigRaw as any).projectId) ? firebaseConfigRaw : fallbackConfig;
 
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
-const db = getFirestore(app, (firebaseConfig as any).firestoreDatabaseId || "ai-studio-remixtokimtra168-5cfdad5b-1f57-4e8f-b230-705f8ed45eda");
+const db = getFirestore(app, (firebaseConfig as any).firestoreDatabaseId || "ai-studio-remixtokimtra178-eea5e342-e96f-47b5-9bae-cee722f798ff");
 
 export interface CustomLessonItem {
   id: string;

@@ -7,6 +7,10 @@ service cloud.firestore {
     match /custom_ppct/{id} {
       allow read, write: if true;
     }
+    match /deleted_accounts/{id} {
+      allow read, write: if true;
+    }
   }
 }
+
 

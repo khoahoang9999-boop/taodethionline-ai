@@ -13,6 +13,8 @@ interface ApiKeyModalProps {
   apiKeys: ApiKeyItem[];
   onSave: (keys: ApiKeyItem[]) => void;
   accountName?: string;
+  accountUsername?: string;
+  requireKey?: boolean;
   onOpenProfileModal?: () => void;
 }
 
@@ -22,6 +24,8 @@ export default function ApiKeyModal({
   apiKeys,
   onSave,
   accountName,
+  accountUsername,
+  requireKey = false,
   onOpenProfileModal
 }: ApiKeyModalProps) {
   const [keyList, setKeyList] = useState<ApiKeyItem[]>(() => {
@@ -38,10 +42,12 @@ export default function ApiKeyModal({
   const [testingStatus, setTestingStatus] = useState<{
     [id: string]: { loading: boolean; ok?: boolean; message?: string };
   }>({});
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   // Re-sync keyList whenever modal opens with latest apiKeys
   React.useEffect(() => {
     if (isOpen) {
+      setSubmitError(null);
       if (apiKeys && apiKeys.length > 0) {
         setKeyList(
           apiKeys.map((k, idx) => ({
@@ -125,6 +131,7 @@ export default function ApiKeyModal({
   };
 
   const handleUpdateField = (id: string, field: keyof ApiKeyItem, value: string) => {
+    setSubmitError(null);
     // Reset test status when key value changes
     if (field === "key") {
       setTestingStatus((prev) => {
@@ -146,6 +153,10 @@ export default function ApiKeyModal({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const validKeys = keyList.filter((k) => k.key.trim().length > 0);
+    if (requireKey && validKeys.length === 0) {
+      setSubmitError("Bắt buộc nhập API Key: Vui lòng dán ít nhất 01 Gemini API Key cá nhân (bắt đầu bằng AIza...) vào ô bên dưới trước khi lưu!");
+      return;
+    }
     onSave(validKeys);
     onClose();
   };
@@ -161,7 +172,7 @@ export default function ApiKeyModal({
             </div>
             <div>
               <h3 className="font-bold text-sm text-slate-100 flex items-center gap-2">
-                Cài đặt API Key
+                Cài đặt API Key Cá Nhân
                 {accountName && (
                   <span className="text-[11px] bg-blue-500/30 text-blue-300 px-2 py-0.5 rounded font-medium">
                     {accountName}
@@ -184,12 +195,50 @@ export default function ApiKeyModal({
 
         {/* Content Body */}
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5 space-y-4">
-          {/* Quick Profile Name Bar */}
+          {/* Mandatory API Key Banner when teacher has no key */}
+          {requireKey && keyList.filter((k) => k.key.trim().length > 0).length === 0 && (
+            <div className="bg-rose-50 border-2 border-rose-300 rounded-xl p-3.5 flex gap-3 text-rose-950 text-xs leading-relaxed shadow-2xs">
+              <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p className="font-bold text-rose-900">
+                  ⚠️ Yêu cầu bắt buộc: Vui lòng tự nhập Gemini API Key cá nhân!
+                </p>
+                <p className="text-rose-800">
+                  Tài khoản của Quý Thầy/Cô hiện chưa có API Key. Vui lòng lấy mã Key miễn phí tại{" "}
+                  <a
+                    href="https://aistudio.google.com/apikey"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-bold underline text-rose-900 hover:text-blue-700"
+                  >
+                    aistudio.google.com/apikey
+                  </a>{" "}
+                  và dán vào ô bên dưới để bắt đầu biên soạn Ma trận & Đề kiểm tra.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {submitError && (
+            <div className="bg-rose-100 border border-rose-300 text-rose-900 rounded-xl p-3 text-xs font-bold flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+              <span>{submitError}</span>
+            </div>
+          )}
+
+          {/* Quick Profile Name Bar showing both Login Username and Display Name */}
           {onOpenProfileModal && (
             <div className="bg-slate-100 border border-slate-200 rounded-xl p-3 flex items-center justify-between gap-3 text-xs">
-              <div className="flex items-center gap-2 text-slate-700">
-                <User className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>Tên tài khoản: <strong className="text-slate-900">{accountName || "Chưa đặt tên"}</strong></span>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 text-slate-700">
+                <div className="flex items-center gap-1.5">
+                  <User className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                  <span>Tên đăng nhập: <strong className="text-indigo-900">@{accountUsername || accountName || "user"}</strong></span>
+                </div>
+                <span className="hidden sm:inline text-slate-300">|</span>
+                <div className="flex items-center gap-1.5">
+                  <Edit3 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span>Tên hiển thị: <strong className="text-slate-900">{accountName || "Chưa đặt tên"}</strong></span>
+                </div>
               </div>
               <button
                 type="button"
@@ -200,7 +249,7 @@ export default function ApiKeyModal({
                 className="bg-white hover:bg-emerald-50 text-emerald-700 font-bold px-3 py-1.5 rounded-lg border border-emerald-300 text-[11px] flex items-center gap-1 shadow-2xs transition-all cursor-pointer shrink-0"
               >
                 <Edit3 className="w-3 h-3" />
-                <span>Đổi tên hiển thị</span>
+                <span>Sửa tên & Hồ sơ</span>
               </button>
             </div>
           )}

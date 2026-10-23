@@ -11,9 +11,10 @@ import {
   Phone,
   CheckCircle2,
   ExternalLink,
-  Laptop
+  Laptop,
+  Camera
 } from "lucide-react";
-import { formatDateVN } from "../lib/client-auth";
+import { formatDateVN, isAccountLicensed } from "../lib/client-auth";
 
 interface UserAvatarDropdownProps {
   currentUser: any;
@@ -63,14 +64,9 @@ export default function UserAvatarDropdown({
 
   const displayName = currentUser?.customerName || currentUser?.id || "Khách (Chưa đăng nhập)";
   const userCode = currentUser?.id || "Chưa có mã";
-  const initials = currentUser
-    ? displayName
-        .split(" ")
-        .filter(Boolean)
-        .slice(-2)
-        .map((w: string) => w[0]?.toUpperCase())
-        .join("") || userCode.slice(0, 2)
-    : "👤";
+  const userAvatarSrc =
+    currentUser?.avatar ||
+    `https://api.dicebear.com/7.x/lorelei/svg?seed=${encodeURIComponent(userCode || displayName)}&backgroundColor=c0aede,b6e3f4,ffdfbf`;
 
   return (
     <div className="relative" ref={dropdownRef}>
@@ -91,7 +87,7 @@ export default function UserAvatarDropdown({
           <div className="w-8 h-8 rounded-full bg-slate-200 border border-slate-300 flex items-center justify-center shadow-inner overflow-hidden">
             {currentUser ? (
               <img 
-                src={`https://api.dicebear.com/7.x/lorelei/svg?seed=${userCode}&backgroundColor=c0aede,b6e3f4,ffdfbf`} 
+                src={userAvatarSrc} 
                 alt="Avatar" 
                 className="w-full h-full object-cover" 
               />
@@ -133,21 +129,45 @@ export default function UserAvatarDropdown({
 
       {/* Modern Floating Dropdown Menu */}
       {isOpen && (
-        <div className="absolute right-0 top-full mt-2 w-72 sm:w-80 bg-white rounded-2xl shadow-2xl border border-slate-200/90 py-2 z-[120] text-slate-800 animate-in fade-in zoom-in-95 duration-150 origin-top-right overflow-hidden">
+        <div className="absolute right-0 top-full mt-2 w-72 sm:w-84 bg-white rounded-2xl shadow-2xl border border-slate-200/90 py-2 z-[120] text-slate-800 animate-in fade-in zoom-in-95 duration-150 origin-top-right overflow-hidden">
           {/* Menu Header / Profile Card */}
           <div className="px-4 py-3 border-b border-slate-100 bg-gradient-to-br from-slate-50 to-blue-50/40">
             <div className="flex items-center gap-3">
-              <div className="w-11 h-11 rounded-full bg-slate-200 border border-slate-300 flex items-center justify-center shrink-0 shadow-md overflow-hidden">
-                {currentUser ? (
-                  <img 
-                    src={`https://api.dicebear.com/7.x/lorelei/svg?seed=${userCode}&backgroundColor=c0aede,b6e3f4,ffdfbf`} 
-                    alt="Avatar" 
-                    className="w-full h-full object-cover" 
-                  />
-                ) : (
-                  <span className="text-xl">👤</span>
+              {/* Interactive Avatar button to trigger avatar change */}
+              <button
+                type="button"
+                onClick={() => {
+                  setIsOpen(false);
+                  if (currentUser) onOpenProfile();
+                  else onLogin();
+                }}
+                className="relative group cursor-pointer focus:outline-none"
+                title="Bấm để thay đổi ảnh đại diện (Avatar)"
+              >
+                <div className="w-12 h-12 rounded-full bg-slate-200 border-2 border-blue-500/80 flex items-center justify-center shrink-0 shadow-md overflow-hidden transition-all group-hover:scale-105 group-hover:border-blue-600">
+                  {currentUser ? (
+                    <img 
+                      src={userAvatarSrc} 
+                      alt="Avatar" 
+                      className="w-full h-full object-cover" 
+                    />
+                  ) : (
+                    <span className="text-xl">👤</span>
+                  )}
+                </div>
+                {currentUser && (
+                  <div className="absolute inset-0 rounded-full bg-slate-900/60 text-white flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Camera className="w-4 h-4 text-white" />
+                    <span className="text-[8px] font-bold text-white mt-0.5">Đổi ảnh</span>
+                  </div>
                 )}
-              </div>
+                {currentUser && (
+                  <span className="absolute -bottom-0.5 -right-0.5 p-0.5 bg-blue-600 text-white rounded-full border border-white shadow-xs group-hover:bg-blue-700">
+                    <Camera className="w-2.5 h-2.5" />
+                  </span>
+                )}
+              </button>
+
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5">
                   <h4 className="font-extrabold text-slate-900 text-sm truncate">
@@ -159,6 +179,11 @@ export default function UserAvatarDropdown({
                     </span>
                   )}
                 </div>
+                {currentUser && (
+                  <p className="text-[10.5px] text-indigo-700 font-semibold mt-0.5 truncate">
+                    Tên đăng nhập: @{currentUser.username || currentUser.id}
+                  </p>
+                )}
                 {isAdmin ? (
                   <p className="text-[10px] text-amber-600 font-bold mt-0.5 flex items-center gap-1">
                     🌟 Tài khoản Quản trị cấp cao
@@ -173,17 +198,44 @@ export default function UserAvatarDropdown({
 
             {/* Subscription & Device stats if logged in */}
             {currentUser && (
-              <div className="mt-2.5 pt-2.5 border-t border-slate-200/60 flex items-center justify-between text-[11px] text-slate-600">
-                <div className="flex items-center gap-1">
-                  <Clock className="w-3 h-3 text-slate-400" />
-                  <span>Hạn: <strong className="text-slate-800">{formatDateVN(currentUser.expiryDate)}</strong></span>
-                </div>
-                {!isAdmin && (
-                  <div className="flex items-center gap-1 text-emerald-700">
-                    <Laptop className="w-3 h-3 text-emerald-600" />
-                    <span title="Số lượng thiết bị được phép đăng nhập">
-                      Cho phép: <strong>{currentUser.maxDevices || 2} máy</strong>
+              <div className="mt-2.5 pt-2.5 border-t border-slate-200/60 space-y-1.5 text-[11px] text-slate-600">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1">
+                    <Clock className="w-3 h-3 text-slate-400" />
+                    <span>
+                      {isAccountLicensed(currentUser.expiryDate) ? (
+                        <>Hạn: <strong className="text-emerald-700">{formatDateVN(currentUser.expiryDate)}</strong></>
+                      ) : (
+                        <span className="text-amber-700 font-bold">Chưa cấp hạn theo năm</span>
+                      )}
                     </span>
+                  </div>
+                  {!isAdmin && (
+                    <div className="flex items-center gap-1 text-slate-600">
+                      <Laptop className="w-3 h-3 text-slate-400" />
+                      <span>{currentUser.maxDevices || 2} máy</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Trial or License Badge */}
+                {!isAdmin && (
+                  <div className="pt-1">
+                    {isAccountLicensed(currentUser.expiryDate) ? (
+                      <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-2 py-1 rounded-lg font-bold flex items-center justify-between text-[10.5px]">
+                        <span>👑 Bản quyền đầy đủ</span>
+                        <span className="text-[10px] text-emerald-600">Không giới hạn</span>
+                      </div>
+                    ) : (
+                      <div className={`px-2 py-1 rounded-lg font-bold flex items-center justify-between border text-[10.5px] ${
+                        (currentUser.trialCount || 0) >= 5
+                          ? "bg-rose-50 border-rose-200 text-rose-800"
+                          : "bg-amber-50 border-amber-200 text-amber-800"
+                      }`}>
+                        <span>{(currentUser.trialCount || 0) >= 5 ? "🔒 Hết 5 lượt dùng thử" : `⏳ Dùng thử: Đã dùng ${currentUser.trialCount || 0}/5 lượt`}</span>
+                        <span className="text-[10px]">{(currentUser.trialCount || 0) >= 5 ? "Khóa tạo đề" : `Còn ${Math.max(0, 5 - (currentUser.trialCount || 0))} lượt`}</span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -207,12 +259,12 @@ export default function UserAvatarDropdown({
                 </div>
                 <div className="flex-1">
                   <div className="font-extrabold text-blue-800 text-sm">Đăng nhập tài khoản</div>
-                  <div className="text-[11px] text-blue-600 font-normal">Nhập mã kích hoạt của bạn để sử dụng đầy đủ tính năng</div>
+                  <div className="text-[11px] text-blue-600 font-normal">Nhập tên và mật khẩu của bạn để sử dụng đầy đủ tính năng</div>
                 </div>
               </button>
             )}
 
-            {/* 1. Hồ sơ của bạn / Đổi tên hiển thị */}
+            {/* 1. Đổi ảnh đại diện (Avatar) */}
             <button
               type="button"
               onClick={() => {
@@ -225,7 +277,34 @@ export default function UserAvatarDropdown({
               }}
               className="w-full px-4 py-2.5 text-left text-xs font-semibold text-slate-700 hover:text-blue-700 hover:bg-blue-50/70 flex items-center gap-3 transition-colors cursor-pointer group"
             >
-              <div className="w-7 h-7 rounded-lg bg-blue-100/70 text-blue-600 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-colors">
+              <div className="w-7 h-7 rounded-lg bg-indigo-100/80 text-indigo-600 flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors shadow-xs">
+                <Camera className="w-3.5 h-3.5" />
+              </div>
+              <div className="flex-1">
+                <div className="text-slate-800 font-bold group-hover:text-indigo-700 flex items-center justify-between">
+                  <span>Thay đổi Avatar</span>
+                  <span className="text-[9.5px] bg-indigo-100 text-indigo-700 font-extrabold px-1.5 py-0.2 rounded">
+                    Tùy chỉnh
+                  </span>
+                </div>
+                <div className="text-[11px] text-slate-400 font-normal">Tải ảnh từ máy, chọn mẫu thầy/cô, ngẫu nhiên</div>
+              </div>
+            </button>
+
+            {/* 2. Hồ sơ & Đổi tên hiển thị */}
+            <button
+              type="button"
+              onClick={() => {
+                setIsOpen(false);
+                if (currentUser) {
+                  onOpenProfile();
+                } else {
+                  onLogin();
+                }
+              }}
+              className="w-full px-4 py-2.5 text-left text-xs font-semibold text-slate-700 hover:text-blue-700 hover:bg-blue-50/70 flex items-center gap-3 transition-colors cursor-pointer group"
+            >
+              <div className="w-7 h-7 rounded-lg bg-blue-100/70 text-blue-600 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-colors shadow-xs">
                 <Edit3 className="w-3.5 h-3.5" />
               </div>
               <div className="flex-1">

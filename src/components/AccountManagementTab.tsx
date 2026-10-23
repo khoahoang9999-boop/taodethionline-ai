@@ -9,7 +9,12 @@ import {
   clientAdminToggleStatus,
   clientAdminRenewAccount,
   clientAdminUpdateAccount,
-  clientAdminUpdateKeys
+  clientAdminUpdateKeys,
+  clientAdminChangePassword,
+  clientAdminQuickRenew1Year1Day,
+  clientAdminSetExpiry,
+  clientAdminResetTrial,
+  isAccountLicensed
 } from "../lib/client-auth";
 import {
   ShieldCheck,
@@ -35,15 +40,20 @@ import {
   Edit3,
   Pencil,
   Save,
-  X
+  X,
+  Zap
 } from "lucide-react";
 
-interface AccountData {
+export interface AccountData {
   id: string;
+  username?: string;
   customerName: string;
+  password?: string;
   phone: string;
+  avatar?: string;
   createdDate: string;
   expiryDate: string;
+  trialCount?: number;
   maxDevices: number;
   devices: string[];
   status: "active" | "locked";
@@ -77,6 +87,7 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
 
   // Form states for creating account
   const [newCode, setNewCode] = useState("");
+  const [newUsername, setNewUsername] = useState("");
   const [newCustomerName, setNewCustomerName] = useState("");
   const [newPhone, setNewPhone] = useState("");
   const [newExpiryDate, setNewExpiryDate] = useState("2027-12-31");
@@ -97,44 +108,121 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
   // API Key Management state for Admin
   const [apiKeyManagingAccount, setApiKeyManagingAccount] = useState<AccountData | null>(null);
 
-  // Edit Account Info (Customer Name, Phone, MaxDevices, etc.)
+  // Edit Account Info (Username, Customer Name, Phone, MaxDevices, etc.)
   const [editingAccount, setEditingAccount] = useState<AccountData | null>(null);
+  const [editUsername, setEditUsername] = useState("");
   const [editCustomerName, setEditCustomerName] = useState("");
   const [editPhone, setEditPhone] = useState("");
   const [editNotes, setEditNotes] = useState("");
   const [editMaxDevices, setEditMaxDevices] = useState(2);
   const [editExpiryDate, setEditExpiryDate] = useState("");
+  const [editAvatar, setEditAvatar] = useState("");
   const [isUpdatingAccount, setIsUpdatingAccount] = useState(false);
+
+  // Change Password Modal states
+  const [changingPasswordAccount, setChangingPasswordAccount] = useState<AccountData | null>(null);
+  const [newPasswordInput, setNewPasswordInput] = useState("");
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+
+  const handleOpenChangePassword = (acc: AccountData) => {
+    setChangingPasswordAccount(acc);
+    setNewPasswordInput(acc.password || acc.id);
+  };
+
+  const handleSaveChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!changingPasswordAccount) return;
+    const cleanPass = newPasswordInput.trim();
+    if (!cleanPass) {
+      showToast("Mật khẩu mới không được để trống.");
+      return;
+    }
+
+    setIsChangingPassword(true);
+    try {
+      const result = await clientAdminChangePassword(adminPin, changingPasswordAccount.id, cleanPass);
+      if (result && result.success) {
+        showToast(`✓ Đã đổi mật khẩu cho tài khoản "${changingPasswordAccount.customerName}" thành công!`);
+        setChangingPasswordAccount(null);
+        setNewPasswordInput("");
+        fetchAccounts(adminPin);
+      } else {
+        showToast(result?.error || "Không thể đổi mật khẩu.");
+      }
+    } catch (err: any) {
+      showToast(err?.message || "Lỗi khi đổi mật khẩu.");
+    } finally {
+      setIsChangingPassword(false);
+    }
+  };
+
+  const handleQuickRenew1Year1Day = async (acc: AccountData) => {
+    setIsLoading(true);
+    try {
+      const result = await clientAdminQuickRenew1Year1Day(adminPin, acc.id);
+      if (result && result.success) {
+        showToast(`✓ Đã cấp hạn dùng 1 năm + 1 ngày cho ${acc.customerName}! (Hạn mới: ${formatDateVN(result.account?.expiryDate)})`);
+        fetchAccounts(adminPin);
+      } else {
+        showToast(result?.error || "Không thể cấp hạn dùng.");
+      }
+    } catch (err: any) {
+      showToast(err?.message || "Lỗi khi cấp hạn dùng.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleResetTrial = async (acc: AccountData) => {
+    setIsLoading(true);
+    try {
+      const result = await clientAdminResetTrial(adminPin, acc.id);
+      if (result && result.success) {
+        showToast(`✓ Đã đặt lại lượt dùng thử về 0/5 cho ${acc.customerName}!`);
+        fetchAccounts(adminPin);
+      } else {
+        showToast(result?.error || "Không thể đặt lại lượt dùng thử.");
+      }
+    } catch (err: any) {
+      showToast(err?.message || "Lỗi khi đặt lại lượt dùng thử.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleOpenEditAccount = (acc: AccountData) => {
     setEditingAccount(acc);
+    setEditUsername(acc.username || "");
     setEditCustomerName(acc.customerName || "");
     setEditPhone(acc.phone || "");
     setEditNotes(acc.notes || "");
     setEditMaxDevices(acc.maxDevices || 2);
     setEditExpiryDate(acc.expiryDate || "2027-12-31");
+    setEditAvatar(acc.avatar || "");
   };
 
   const handleSaveAccountEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingAccount) return;
     if (!editCustomerName.trim()) {
-      showToast("Tên khách hàng / Trường học không được để trống.");
+      showToast("Tên hiển thị / Họ tên giáo viên không được để trống.");
       return;
     }
 
     setIsUpdatingAccount(true);
     try {
       const result = await clientAdminUpdateAccount(adminPin, editingAccount.id, {
+        username: editUsername.trim() || undefined,
         customerName: editCustomerName.trim(),
         phone: editPhone.trim(),
         notes: editNotes.trim(),
         maxDevices: Number(editMaxDevices) || 2,
-        expiryDate: editExpiryDate.trim() || editingAccount.expiryDate
+        expiryDate: editExpiryDate.trim() || editingAccount.expiryDate,
+        avatar: editAvatar
       });
 
       if (result && result.success) {
-        showToast(`Đã cập nhật tên và thông tin tài khoản "${editingAccount.id}" thành công!`);
+        showToast(`Đã cập nhật tài khoản "${editCustomerName}" thành công!`);
         setEditingAccount(null);
         fetchAccounts(adminPin);
       } else {
@@ -152,10 +240,10 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
     const id = currentUser?.id?.trim().toUpperCase() || "";
     const isAdmin = id === "TK-KHOA-2026" || id === "ADMIN123" || currentUser?.notes?.toLowerCase().includes("admin") || currentUser?.customerName?.toLowerCase().includes("admin");
     if (isAdmin) {
-      setAdminPin("0989982818");
+      setAdminPin("123456");
       if (!isUnlocked) {
         setIsUnlocked(true);
-        setTimeout(() => fetchAccounts("0989982818"), 100);
+        setTimeout(() => fetchAccounts("123456"), 100);
       }
     } else if (adminPin && !isUnlocked) {
       verifyPin(adminPin);
@@ -188,7 +276,10 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
     setIsLoading(true);
     try {
       const list = await clientAdminGetAccounts(key);
-      setAccounts(list);
+      const rawDeleted = localStorage.getItem("khaothi_deleted_account_ids");
+      const deletedSet = rawDeleted ? new Set<string>(JSON.parse(rawDeleted).map((s: string) => String(s).toUpperCase())) : new Set<string>();
+      const activeList = list.filter((a) => !deletedSet.has((a.id || "").toUpperCase()) && !a.isDeleted);
+      setAccounts(activeList);
     } catch (err) {
       console.error("Fetch accounts error:", err);
     } finally {
@@ -197,22 +288,26 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
   };
 
   const handleGenerateRandomCode = () => {
-    const num = Math.floor(1000 + Math.random() * 9000);
-    setNewCode(`TK-TINHOC-${num}`);
+    const num = Math.floor(100000 + Math.random() * 900000);
+    setNewCode(String(num));
   };
 
   const handleCreateAccount = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCustomerName.trim()) {
-      showToast("Vui lòng nhập Tên khách hàng / Trường học.");
+      showToast("Vui lòng nhập Tên hiển thị (Họ và tên giáo viên).");
       return;
     }
 
-    if (newCode.trim()) {
-      const codeUpper = newCode.trim().toUpperCase();
-      const isDuplicate = accounts.some((a) => a.id.toUpperCase() === codeUpper);
-      if (isDuplicate) {
-        showToast(`Mã tài khoản "${codeUpper}" đã tồn tại trong danh sách. Không thể tạo trùng mã!`);
+    const usernameToSet = (newUsername.trim() || newCustomerName.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").replace(/[^a-z0-9]/g, "")).trim();
+    const passwordToSet = newCode.trim() || "123456";
+
+    // Check duplicate username if specified
+    if (newUsername.trim()) {
+      const normInput = newUsername.trim().toLowerCase();
+      const isDuplicateUser = accounts.some((a) => (a.username || "").toLowerCase().trim() === normInput);
+      if (isDuplicateUser) {
+        showToast(`Tên đăng nhập "${newUsername.trim()}" đã tồn tại. Vui lòng chọn Tên đăng nhập khác.`);
         return;
       }
     }
@@ -220,8 +315,9 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
     setIsCreating(true);
     try {
       const result = await clientAdminCreateAccount(adminPin, {
-        id: newCode.trim() || undefined,
+        username: usernameToSet,
         customerName: newCustomerName.trim(),
+        password: passwordToSet,
         phone: newPhone.trim(),
         expiryDate: newExpiryDate,
         maxDevices: newMaxDevices,
@@ -229,8 +325,9 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
       });
 
       if (result.success && result.account) {
-        showToast(`Đã cấp thành công mã tài khoản: ${result.account.id}`);
+        showToast(`✓ Đã tạo thành công tài khoản cho "${result.account.customerName}" (Tên đăng nhập: ${result.account.username || usernameToSet}, Mật khẩu: ${passwordToSet})`);
         setNewCode("");
+        setNewUsername("");
         setNewCustomerName("");
         setNewPhone("");
         setNewNotes("");
@@ -239,19 +336,31 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
         showToast(result.error || "Không thể tạo tài khoản.");
       }
     } catch {
-      showToast("Lỗi kết nối.");
+      showToast("Lỗi kết nối máy chủ.");
     } finally {
       setIsCreating(false);
     }
   };
 
   const handleDeleteAccount = async (id: string) => {
+    const acc = accounts.find((a) => a.id === id);
+    const displayName = acc ? acc.customerName : id;
     setConfirmDialog({
-      message: `Thầy/Cô có chắc chắn muốn xóa tài khoản "${id}" không?`,
+      message: `Bạn có chắc chắn muốn XÓA VĨNH VIỄN tài khoản người dùng "${displayName}" (${id}) không? Tài khoản này sẽ không bao giờ hiển thị lại trong danh sách.`,
       onConfirm: async () => {
+        const normId = id.trim().toUpperCase();
+        try {
+          const raw = localStorage.getItem("khaothi_deleted_account_ids");
+          const set = raw ? new Set(JSON.parse(raw)) : new Set<string>();
+          set.add(normId);
+          set.add(id.trim());
+          localStorage.setItem("khaothi_deleted_account_ids", JSON.stringify(Array.from(set)));
+        } catch {}
+        setAccounts((prev) => prev.filter((a) => a.id.toUpperCase() !== normId));
+
         const ok = await clientAdminDeleteAccount(adminPin, id);
         if (ok) {
-          showToast(`Đã xóa tài khoản ${id}`);
+          showToast(`Đã xóa vĩnh viễn tài khoản ${displayName}`);
           fetchAccounts(adminPin);
         } else {
           showToast("Lỗi khi xóa tài khoản.");
@@ -290,7 +399,9 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
   };
 
   const handleCopyZaloNotice = (acc: AccountData) => {
-    const text = `THÔNG BÁO CẤP TÀI KHOẢN KHẢO THÍ GDPT 2018\n--------------------------------------------\nKính gửi: ${acc.customerName}\n• Hạn sử dụng: ${formatDateVN(acc.expiryDate)}\n• Số thiết bị tối đa: ${acc.maxDevices} máy\n--------------------------------------------\nĐịa chỉ ứng dụng: https://taodethionline-ai.vercel.app/`;
+    const pass = acc.password || acc.id;
+    const user = acc.username || acc.customerName;
+    const text = `THÔNG BÁO CẤP TÀI KHOẢN KHẢO THÍ GDPT 2018\n--------------------------------------------\nKính gửi: ${acc.customerName}\n• Tên hiển thị: ${acc.customerName}\n• Tên đăng nhập: ${user}\n• Mật khẩu: ${pass}\n• Hạn sử dụng: ${formatDateVN(acc.expiryDate)}\n• Số thiết bị tối đa: ${acc.maxDevices} máy\n--------------------------------------------\nĐịa chỉ ứng dụng: https://taodethionline-ai.vercel.app/`;
 
     navigator.clipboard.writeText(text);
     setCopiedCode(acc.id);
@@ -498,37 +609,55 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
 
           <form onSubmit={handleCreateAccount} className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {/* Account Code */}
+              {/* Username (Tên đăng nhập riêng) */}
               <div className="space-y-1">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-slate-700">Mã tài khoản:</label>
-                  <button
-                    type="button"
-                    onClick={handleGenerateRandomCode}
-                    className="text-[10.5px] font-bold text-blue-600 hover:underline cursor-pointer flex items-center gap-1"
-                  >
-                    <Sparkles className="w-3 h-3" /> Tạo mã tự động
-                  </button>
-                </div>
+                <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                  <span>1. Tên đăng nhập:</span>
+                  <span className="text-[10.5px] text-slate-400 font-normal">Dùng để đăng nhập vào app</span>
+                </label>
                 <input
                   type="text"
-                  value={newCode}
-                  onChange={(e) => setNewCode(e.target.value.toUpperCase())}
-                  placeholder="Để trống sẽ tự tạo (VD: TK-TINHOC-8912)"
-                  className="w-full text-xs font-bold text-blue-900 border border-slate-300 rounded-xl px-3 py-2 bg-white focus:ring-2 focus:ring-blue-500 outline-none uppercase"
+                  value={newUsername}
+                  onChange={(e) => setNewUsername(e.target.value)}
+                  placeholder="VD: cothao_tinhoc, nguyenvana, letrinh..."
+                  className="w-full text-xs font-bold text-indigo-900 border border-slate-300 rounded-xl px-3 py-2 bg-indigo-50/30 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
                 />
               </div>
 
-              {/* Customer Name */}
+              {/* Display Name (Tên hiển thị riêng) */}
               <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-700">Tên Khách hàng / Trường học (*):</label>
+                <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                  <span>2. Tên hiển thị / Họ tên giáo viên (*):</span>
+                  <span className="text-[10.5px] text-blue-600 font-medium">Hiện trên trang & chữ ký</span>
+                </label>
                 <input
                   type="text"
                   required
                   value={newCustomerName}
                   onChange={(e) => setNewCustomerName(e.target.value)}
-                  placeholder="VD: Thầy Nguyễn Văn A - THCS Tân Loan"
+                  placeholder="VD: Cô Nguyễn Thị Phương Thảo hoặc Thầy Hoàng Văn Đình Khoa"
                   className="w-full text-xs font-semibold text-slate-800 border border-slate-300 rounded-xl px-3 py-2 bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+
+              {/* Account Password */}
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-700">3. Mật khẩu đăng nhập (*):</label>
+                  <button
+                    type="button"
+                    onClick={handleGenerateRandomCode}
+                    className="text-[10.5px] font-bold text-blue-600 hover:underline cursor-pointer flex items-center gap-1"
+                  >
+                    <Sparkles className="w-3 h-3" /> Tạo mật khẩu tự động
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  value={newCode}
+                  onChange={(e) => setNewCode(e.target.value)}
+                  placeholder="VD: 123456 (để trống sẽ là 123456)"
+                  className="w-full text-xs font-bold text-blue-900 border border-slate-300 rounded-xl px-3 py-2 bg-white focus:ring-2 focus:ring-blue-500 outline-none"
                 />
               </div>
 
@@ -599,7 +728,7 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
                 className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow cursor-pointer transition-all flex items-center gap-1.5"
               >
                 <UserPlus className="w-4 h-4" />
-                <span>{isCreating ? "Đang khởi tạo mã..." : "Cấp mã tài khoản mới"}</span>
+                <span>{isCreating ? "Đang tạo tài khoản..." : "Tạo tài khoản mới"}</span>
               </button>
             </div>
           </form>
@@ -681,10 +810,10 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
-                <th className="py-2.5 px-3">Mã Tài Khoản</th>
-                <th className="py-2.5 px-3">Khách Hàng / SĐT</th>
-                <th className="py-2.5 px-3">Ngày Cấp</th>
-                <th className="py-2.5 px-3">Hạn Sử Dụng</th>
+                <th className="py-2.5 px-3">Mật Khẩu / ID</th>
+                <th className="py-2.5 px-3">Tên Đăng Nhập / SĐT</th>
+                <th className="py-2.5 px-3">Hạn Sử Dụng / Cấp Nhanh</th>
+                <th className="py-2.5 px-3 text-center">Chế Độ & Lượt Dùng</th>
                 <th className="py-2.5 px-3 text-center">Đã Đăng Ký Máy</th>
                 <th className="py-2.5 px-3 text-center">Trạng Thái</th>
                 <th className="py-2.5 px-3 text-right">Thao Tác Quản Lý</th>
@@ -703,6 +832,8 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
                   const isFull = deviceCount >= acc.maxDevices;
                   const todayStr = new Date().toISOString().slice(0, 10);
                   const isExpired = acc.expiryDate && acc.expiryDate !== "2099-12-31" && acc.expiryDate < todayStr;
+                  const isLicensed = isAccountLicensed(acc.expiryDate);
+                  const trialCount = acc.trialCount || 0;
 
                   return (
                     <tr
@@ -715,61 +846,131 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
                           : "hover:bg-slate-50/80 border-b border-slate-100"
                       }`}
                     >
-                      {/* Code */}
+                      {/* Password / ID */}
                       <td className="py-3 px-3">
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-mono font-bold text-blue-900 bg-blue-50 border border-blue-200 px-2 py-1 rounded-lg text-xs">
-                            {acc.id}
-                          </span>
-                          {(acc.customerName.toLowerCase().includes("admin") ||
-                            acc.id.toLowerCase().includes("admin") ||
-                            (acc.notes && acc.notes.toLowerCase().includes("admin"))) && (
-                            <span className="bg-amber-100 text-amber-900 border border-amber-300/80 font-bold px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wide">
-                              Admin
+                        <div className="flex flex-col gap-1 items-start">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-mono font-bold text-blue-900 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-lg text-xs">
+                              {acc.password || acc.id}
                             </span>
-                          )}
+                            <button
+                              type="button"
+                              onClick={() => handleOpenChangePassword(acc)}
+                              className="p-1 hover:bg-indigo-50 text-indigo-600 rounded cursor-pointer transition-colors"
+                              title="Cấp / Đổi Mật khẩu cho tài khoản này"
+                            >
+                              <Key className="w-3.5 h-3.5 text-indigo-600" />
+                            </button>
+                            {(acc.customerName.toLowerCase().includes("admin") ||
+                              acc.id.toLowerCase().includes("admin") ||
+                              (acc.notes && acc.notes.toLowerCase().includes("admin"))) && (
+                              <span className="bg-amber-100 text-amber-900 border border-amber-300/80 font-bold px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wide">
+                                Admin
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[10px] text-slate-500 italic">Mật khẩu</span>
                         </div>
                       </td>
 
-                      {/* Customer Name & Phone */}
+                      {/* Customer Name, Avatar & Phone */}
                       <td className="py-3 px-3">
-                        <div className="flex items-center gap-1.5 group">
-                          <div className="font-bold text-slate-800">{acc.customerName}</div>
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-full overflow-hidden border border-slate-200 bg-slate-100 shrink-0 shadow-xs">
+                            <img
+                              src={acc.avatar || `https://api.dicebear.com/7.x/lorelei/svg?seed=${encodeURIComponent(acc.id || acc.customerName)}&backgroundColor=c0aede,b6e3f4,ffdfbf`}
+                              alt={acc.customerName}
+                              className="w-full h-full object-cover"
+                            />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5 group">
+                              <div className="font-bold text-slate-800 truncate">{acc.customerName}</div>
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEditAccount(acc)}
+                                className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-all cursor-pointer"
+                                title="Chỉnh sửa tên hiển thị / Tên đăng nhập / Avatar"
+                              >
+                                <Pencil className="w-3.5 h-3.5 text-blue-600" />
+                              </button>
+                            </div>
+                            <div className="text-[11px] text-slate-500 flex items-center gap-2 flex-wrap">
+                              {acc.username && (
+                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 font-semibold border border-indigo-100 text-[10.5px]">
+                                  Đăng nhập: @{acc.username}
+                                </span>
+                              )}
+                              <span className="flex items-center gap-1 text-slate-400">
+                                <Phone className="w-3 h-3 text-slate-400" />
+                                <span>{acc.phone || "Chưa nhập SĐT"}</span>
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* Expiry Date & Quick +1 year +1 day */}
+                      <td className="py-3 px-3">
+                        <div className="flex flex-col gap-1 items-start">
+                          <div>
+                            {isExpired ? (
+                              <span className="inline-flex items-center gap-1 font-bold text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-md text-[10.5px]">
+                                <AlertTriangle className="w-3 h-3 text-rose-600 shrink-0" />
+                                <span>Hết hạn: {formatDateVN(acc.expiryDate)}</span>
+                              </span>
+                            ) : isLicensed ? (
+                              <span
+                                className={`font-semibold px-2 py-0.5 rounded-md text-[11px] ${
+                                  acc.expiryDate === "2099-12-31"
+                                    ? "bg-purple-50 text-purple-700 font-bold border border-purple-200"
+                                    : "bg-emerald-50 text-emerald-800 font-bold border border-emerald-200"
+                                }`}
+                              >
+                                {formatDateVN(acc.expiryDate)}
+                              </span>
+                            ) : (
+                              <span className="text-slate-500 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-md text-[10.5px] font-medium">
+                                Chưa cấp hạn
+                              </span>
+                            )}
+                          </div>
                           <button
                             type="button"
-                            onClick={() => handleOpenEditAccount(acc)}
-                            className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-all cursor-pointer"
-                            title="Chỉnh sửa tên hiển thị / Thông tin"
+                            onClick={() => handleQuickRenew1Year1Day(acc)}
+                            className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-900 bg-amber-100 hover:bg-amber-200 border border-amber-300 px-2 py-0.5 rounded-md cursor-pointer transition-colors shadow-xs"
+                            title="Cấp nhanh 1 năm và 1 ngày, lập tức mở khóa không giới hạn"
                           >
-                            <Pencil className="w-3.5 h-3.5 text-blue-600" />
+                            <Zap className="w-3 h-3 text-amber-600 fill-amber-600" />
+                            <span>+1 năm + 1 ngày</span>
                           </button>
-                        </div>
-                        <div className="text-[11px] text-slate-500 flex items-center gap-1">
-                          <Phone className="w-3 h-3 text-slate-400" />
-                          <span>{acc.phone || "Chưa nhập SĐT"}</span>
                         </div>
                       </td>
 
-                      {/* Created Date */}
-                      <td className="py-3 px-3 text-slate-500 font-medium">{formatDateVN(acc.createdDate)}</td>
-
-                      {/* Expiry Date */}
-                      <td className="py-3 px-3">
-                        {isExpired ? (
-                          <span className="inline-flex items-center gap-1 font-bold text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-md text-[11px]">
-                            <AlertTriangle className="w-3 h-3 text-rose-600 shrink-0" />
-                            <span>Hết hạn: {formatDateVN(acc.expiryDate)}</span>
+                      {/* Trial vs Licensed Mode */}
+                      <td className="py-3 px-3 text-center">
+                        {isLicensed ? (
+                          <span className="inline-flex items-center gap-1 font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full text-[10.5px]">
+                            👑 Bản quyền
                           </span>
                         ) : (
-                          <span
-                            className={`font-semibold ${
-                              acc.expiryDate === "2099-12-31"
-                                ? "text-purple-700 font-bold"
-                                : "text-slate-700"
-                            }`}
-                          >
-                            {formatDateVN(acc.expiryDate)}
-                          </span>
+                          <div className="flex flex-col items-center gap-1">
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-bold text-[10.5px] ${
+                              trialCount >= 5
+                                ? "bg-rose-100 text-rose-800 border border-rose-200"
+                                : "bg-amber-100 text-amber-800 border border-amber-200"
+                            }`}>
+                              {trialCount >= 5 ? "🔒 Khóa (5/5)" : `⏳ ${trialCount}/5 lượt`}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleResetTrial(acc)}
+                              className="text-[10px] text-blue-600 hover:underline font-semibold cursor-pointer"
+                              title="Đặt lại số lượt dùng thử về 0/5"
+                            >
+                              Đặt lại 0/5
+                            </button>
+                          </div>
                         )}
                       </td>
 
@@ -820,6 +1021,17 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
                       {/* Actions */}
                       <td className="py-3 px-3 text-right">
                         <div className="flex items-center justify-end gap-1.5">
+                          {/* Change Password */}
+                          <button
+                            type="button"
+                            onClick={() => handleOpenChangePassword(acc)}
+                            className="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 rounded-lg font-bold text-[10.5px] cursor-pointer transition-colors flex items-center gap-1"
+                            title="Đổi mật khẩu / Mã tài khoản"
+                          >
+                            <Key className="w-3 h-3 text-indigo-600" />
+                            <span>Đổi MK</span>
+                          </button>
+
                           {/* Edit Customer Name & Info */}
                           <button
                             type="button"
@@ -874,7 +1086,7 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
                           <button
                             type="button"
                             onClick={() => handleResetDevices(acc.id)}
-                            className="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-lg font-bold text-[10.5px] cursor-pointer transition-colors flex items-center gap-1"
+                            className="px-2 py-1 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg font-bold text-[10.5px] cursor-pointer transition-colors flex items-center gap-1"
                             title="Xóa danh sách máy đã đăng ký để khách đổi máy mới"
                           >
                             <RefreshCw className="w-3 h-3" />
@@ -956,12 +1168,27 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
               {/* Quick Renewal Options */}
               <div className="space-y-2">
                 <label className="font-bold text-slate-700 block">Chọn gia hạn nhanh:</label>
-                <div className="grid grid-cols-3 gap-2">
+
+                {/* Quick 1 year + 1 day button */}
+                <button
+                  type="button"
+                  disabled={isRenewing}
+                  onClick={() => {
+                    handleQuickRenew1Year1Day(renewingAccount);
+                    setRenewingAccount(null);
+                  }}
+                  className="w-full py-2.5 px-3 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 active:scale-98 text-white font-bold rounded-xl shadow-md cursor-pointer transition-all flex items-center justify-center gap-2 text-xs"
+                >
+                  <Zap className="w-4 h-4 fill-white" />
+                  <span>⚡ Cấp nhanh 1 năm + 1 ngày (Mở khóa không giới hạn)</span>
+                </button>
+
+                <div className="grid grid-cols-3 gap-2 pt-1">
                   <button
                     type="button"
                     disabled={isRenewing}
                     onClick={() => handleRenewAccount(renewingAccount.id, 1)}
-                    className="py-2.5 px-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold rounded-xl shadow-sm cursor-pointer transition-all flex flex-col items-center justify-center gap-1 disabled:opacity-50 text-[11px]"
+                    className="py-2 px-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold rounded-xl shadow-sm cursor-pointer transition-all flex flex-col items-center justify-center gap-1 disabled:opacity-50 text-[11px]"
                   >
                     <CalendarPlus className="w-4 h-4" />
                     <span>+1 Năm</span>
@@ -971,7 +1198,7 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
                     type="button"
                     disabled={isRenewing}
                     onClick={() => handleRenewAccount(renewingAccount.id, 2)}
-                    className="py-2.5 px-2 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-bold rounded-xl shadow-sm cursor-pointer transition-all flex flex-col items-center justify-center gap-1 disabled:opacity-50 text-[11px]"
+                    className="py-2 px-2 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-bold rounded-xl shadow-sm cursor-pointer transition-all flex flex-col items-center justify-center gap-1 disabled:opacity-50 text-[11px]"
                   >
                     <CalendarPlus className="w-4 h-4" />
                     <span>+2 Năm</span>
@@ -981,7 +1208,7 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
                     type="button"
                     disabled={isRenewing}
                     onClick={() => handleRenewAccount(renewingAccount.id, 1, "2099-12-31")}
-                    className="py-2.5 px-2 bg-purple-600 hover:bg-purple-700 active:scale-95 text-white font-bold rounded-xl shadow-sm cursor-pointer transition-all flex flex-col items-center justify-center gap-1 disabled:opacity-50 text-[11px]"
+                    className="py-2 px-2 bg-purple-600 hover:bg-purple-700 active:scale-95 text-white font-bold rounded-xl shadow-sm cursor-pointer transition-all flex flex-col items-center justify-center gap-1 disabled:opacity-50 text-[11px]"
                   >
                     <Sparkles className="w-4 h-4" />
                     <span>Vĩnh Viễn</span>
@@ -1195,10 +1422,57 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
             </div>
 
             <form onSubmit={handleSaveAccountEdit} className="space-y-4">
-              {/* Customer Name */}
+              {/* Avatar Preview & Quick Edit */}
+              <div className="p-3 bg-blue-50/60 rounded-xl border border-blue-200/60 flex items-center gap-3">
+                <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-blue-500 bg-white shrink-0 shadow-sm">
+                  <img
+                    src={editAvatar || `https://api.dicebear.com/7.x/lorelei/svg?seed=${encodeURIComponent(editingAccount.id || editCustomerName)}&backgroundColor=c0aede,b6e3f4,ffdfbf`}
+                    alt="Avatar"
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+                <div className="flex-1 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-700">Ảnh đại diện (Avatar):</label>
+                    {editAvatar && (
+                      <button
+                        type="button"
+                        onClick={() => setEditAvatar("")}
+                        className="text-[11px] text-rose-600 hover:underline font-bold cursor-pointer"
+                      >
+                        Đặt lại mặc định
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    type="text"
+                    value={editAvatar}
+                    onChange={(e) => setEditAvatar(e.target.value)}
+                    placeholder="Dán link ảnh hoặc để trống để dùng mẫu..."
+                    className="w-full text-xs px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                  />
+                </div>
+              </div>
+
+              {/* Username (Tên đăng nhập) */}
               <div className="space-y-1.5">
                 <label className="block text-xs font-bold text-slate-700 flex items-center justify-between">
-                  <span>Tên hiển thị / Tên khách hàng / Trường học:</span>
+                  <span>Tên đăng nhập:</span>
+                  <span className="text-[11px] text-slate-500 font-medium">Tên dùng đăng nhập</span>
+                </label>
+                <input
+                  type="text"
+                  value={editUsername}
+                  onChange={(e) => setEditUsername(e.target.value)}
+                  placeholder="Nhập tên đăng nhập..."
+                  className="w-full px-3.5 py-2 bg-slate-50 focus:bg-white border border-slate-300 rounded-xl text-xs font-bold text-indigo-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                />
+              </div>
+
+              {/* Customer Name (Tên hiển thị) */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-700 flex items-center justify-between">
+                  <span>Tên hiển thị / Họ tên giáo viên (*):</span>
                   <span className="text-[11px] text-blue-600 font-medium">Thay đổi tùy ý</span>
                 </label>
                 <input
@@ -1206,9 +1480,8 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
                   required
                   value={editCustomerName}
                   onChange={(e) => setEditCustomerName(e.target.value)}
-                  placeholder="Nhập tên giáo viên, trường học hoặc tên hiển thị..."
-                  className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-semibold text-slate-800 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                  autoFocus
+                  placeholder="Nhập họ tên giáo viên hoặc trường học..."
+                  className="w-full px-3.5 py-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-800 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                 />
               </div>
 
@@ -1336,6 +1609,76 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
             }
           }}
         />
+      )}
+
+      {/* Change Password Modal */}
+      {changingPasswordAccount && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center font-bold">
+                  <Key className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-800">Cấp / Đổi Mật Khẩu</h3>
+                  <p className="text-[11px] text-slate-500 font-semibold">{changingPasswordAccount.customerName}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setChangingPasswordAccount(null)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 cursor-pointer text-xs font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveChangePassword} className="space-y-4 text-xs">
+              <div className="space-y-1">
+                <label className="font-bold text-slate-700 block">Mật khẩu mới (Mã tài khoản mới):</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newPasswordInput}
+                    onChange={(e) => setNewPasswordInput(e.target.value.toUpperCase())}
+                    placeholder="Nhập mật khẩu mới..."
+                    className="flex-1 text-xs font-bold text-blue-900 border border-slate-300 rounded-xl px-3 py-2 bg-white focus:ring-2 focus:ring-blue-500 outline-none uppercase"
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const num = Math.floor(1000 + Math.random() * 9000);
+                      setNewPasswordInput(`TK-TINHOC-${num}`);
+                    }}
+                    className="px-2.5 py-1 text-[10.5px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl border border-slate-300 cursor-pointer"
+                  >
+                    Ngẫu nhiên
+                  </button>
+                </div>
+                <p className="text-[10.5px] text-slate-500 italic">Mã tức là Mật khẩu người dùng dùng để đăng nhập.</p>
+              </div>
+
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setChangingPasswordAccount(null)}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  disabled={isChangingPassword || !newPasswordInput.trim()}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow-md cursor-pointer disabled:opacity-50"
+                >
+                  {isChangingPassword ? "Đang lưu..." : "Lưu mật khẩu mới"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
       {/* Confirm Dialog */}

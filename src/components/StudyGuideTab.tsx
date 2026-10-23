@@ -28,6 +28,7 @@ import { ALL_TEXTBOOKS, Lesson } from "../data/textbooks";
 import { ALL_MATH_TEXTBOOKS } from "../data/math";
 import { exportStudyGuideToWord } from "../lib/docx-study-guide";
 import { StudyGuideData } from "../lib/docx-generator";
+import { isAccountLicensed } from "../lib/client-auth";
 
 interface StudyGuideTabProps {
   subject: string;
@@ -47,6 +48,7 @@ interface StudyGuideTabProps {
   bghName?: string;
   teacherHeadName?: string;
   creatorName?: string;
+  onOpenApiKeyModal?: () => void;
 }
 
 function formatQuestionText(text: string) {
@@ -92,7 +94,8 @@ export function StudyGuideTab({
   currentUser,
   bghName,
   teacherHeadName,
-  creatorName
+  creatorName,
+  onOpenApiKeyModal
 }: StudyGuideTabProps) {
   // Question Count Settings
   const isMath = subject.toLowerCase().trim().includes("toán");
@@ -211,6 +214,31 @@ export function StudyGuideTab({
 
   // Trigger Study Guide Generation
   const handleGenerateStudyGuide = async () => {
+    if (!currentUser) {
+      setError("Vui lòng đăng nhập đúng Tên tài khoản và Mật khẩu (Mã tài khoản) để sử dụng tính năng tạo đề cương.");
+      return;
+    }
+
+    const isAdmin =
+      currentUser?.id?.trim().toUpperCase() === "TK-KHOA-2026" ||
+      currentUser?.id?.trim().toUpperCase() === "ADMIN123" ||
+      currentUser?.id?.trim() === "123456" ||
+      currentUser?.username?.trim().toLowerCase() === "admin" ||
+      currentUser?.notes?.toLowerCase()?.includes("admin") ||
+      currentUser?.customerName?.toLowerCase()?.includes("admin");
+
+    const validKeys = (userApiKeys || []).filter((k: any) => k && k.key && k.key.trim().length > 0);
+    if (!isAdmin && validKeys.length === 0) {
+      setError("⚠️ Bắt buộc nhập API Key: Quý Thầy/Cô chưa có Gemini API Key cá nhân. Vui lòng tự nhập API Key trong hộp thoại Cài đặt API Key để sử dụng tính năng tạo đề cương!");
+      if (onOpenApiKeyModal) onOpenApiKeyModal();
+      return;
+    }
+
+    if (!isAccountLicensed(currentUser?.expiryDate) && (currentUser?.trialCount || 0) >= 5) {
+      setError("🔒 Tài khoản của bạn đã sử dụng hết 5 lượt dùng thử. Vui lòng liên hệ Admin để được cấp bản quyền thời gian sử dụng theo năm.");
+      return;
+    }
+
     if (selectedLessonsList.length === 0) {
       setError("Vui lòng chọn ít nhất 1 bài học hoặc chương trong kho!");
       return;

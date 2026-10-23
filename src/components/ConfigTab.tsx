@@ -132,6 +132,25 @@ export default function ConfigTab({
     setIsConfigSaved(false);
   };
 
+  const handleUpdateLessonPeriods = (lessonId: string, halfGroup: "firstHalf" | "secondHalf", newPeriods: number) => {
+    const safePeriods = Math.max(1, Math.min(50, Math.floor(newPeriods) || 1));
+    setScopeConfig((prev) => {
+      const updateList = (list: any[]) =>
+        (list || []).map((l) => (l.id === lessonId ? { ...l, periods: safePeriods } : l));
+      const nextConfig: ScopeConfigData = {
+        ...prev,
+        mode: "custom",
+        firstHalfLessons: halfGroup === "firstHalf" ? updateList(prev?.firstHalfLessons) : (prev?.firstHalfLessons || []),
+        secondHalfLessons: halfGroup === "secondHalf" ? updateList(prev?.secondHalfLessons) : (prev?.secondHalfLessons || []),
+      };
+      try {
+        localStorage.setItem("khaothi_current_scope_config", JSON.stringify(nextConfig));
+      } catch {}
+      return nextConfig;
+    });
+    markDirty();
+  };
+
   const handleSignatureUpload = (role: 'bgh' | 'teacherHead' | 'creator', e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -803,21 +822,52 @@ export default function ConfigTab({
                       Chưa chọn bài nửa đầu kỳ
                     </p>
                   ) : (
-                    <div className="border border-blue-200 rounded-md overflow-hidden bg-white max-h-48 overflow-y-auto">
+                    <div className="border border-blue-200 rounded-md overflow-hidden bg-white max-h-56 overflow-y-auto">
                       <table className="w-full text-left text-[11px] border-collapse">
-                        <thead className="bg-blue-50/70 border-b border-blue-100 sticky top-0">
+                        <thead className="bg-blue-50/70 border-b border-blue-100 sticky top-0 z-10">
                           <tr>
-                            <th className="py-1.5 px-2 font-semibold text-blue-800 text-center w-10 border-r border-blue-100/50">STT</th>
+                            <th className="py-1.5 px-2 font-semibold text-blue-800 text-center w-8 border-r border-blue-100/50">STT</th>
                             <th className="py-1.5 px-2 font-semibold text-blue-800">Tên bài học</th>
-                            <th className="py-1.5 px-2 font-semibold text-blue-800 text-center w-14 border-l border-blue-100/50">Số tiết</th>
+                            <th className="py-1.5 px-2 font-semibold text-blue-800 text-center w-24 border-l border-blue-100/50" title="Bấm + / - hoặc nhập số tiết">
+                              Số tiết (Sửa)
+                            </th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-blue-50">
                           {(scopeConfig?.firstHalfLessons || []).filter(l => l.selected).map((l, idx) => (
                             <tr key={l.id} className="hover:bg-blue-50/40">
-                              <td className="py-1 px-2 text-center text-slate-500 border-r border-blue-50">{idx + 1}</td>
+                              <td className="py-1 px-1.5 text-center text-slate-500 border-r border-blue-50">{idx + 1}</td>
                               <td className="py-1 px-2 text-slate-800 font-medium">{l.name}</td>
-                              <td className="py-1 px-2 text-center text-slate-700 font-semibold border-l border-blue-50">{l.periods || 2}</td>
+                              <td className="py-1 px-1 text-center border-l border-blue-50">
+                                <div className="inline-flex items-center justify-center gap-0.5 bg-slate-50 border border-slate-300 rounded px-1 py-0.5 shadow-2xs">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUpdateLessonPeriods(l.id, "firstHalf", (l.periods || 2) - 1)}
+                                    disabled={(l.periods || 2) <= 1}
+                                    className="w-4 h-4 rounded text-slate-600 hover:text-blue-700 hover:bg-blue-100 flex items-center justify-center font-bold text-xs disabled:opacity-30 cursor-pointer"
+                                    title="Giảm 1 tiết"
+                                  >
+                                    -
+                                  </button>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    max={50}
+                                    value={l.periods || 2}
+                                    onChange={(e) => handleUpdateLessonPeriods(l.id, "firstHalf", parseInt(e.target.value, 10))}
+                                    className="w-7 text-center font-bold text-blue-900 bg-white border border-slate-200 rounded text-xs py-0.5 px-0.5 focus:ring-1 focus:ring-blue-500 outline-none"
+                                    title="Nhập số tiết cho bài này để lấy vào ma trận"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUpdateLessonPeriods(l.id, "firstHalf", (l.periods || 2) + 1)}
+                                    className="w-4 h-4 rounded text-slate-600 hover:text-blue-700 hover:bg-blue-100 flex items-center justify-center font-bold text-xs cursor-pointer"
+                                    title="Tăng 1 tiết"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -841,21 +891,52 @@ export default function ConfigTab({
                       Chưa chọn bài nửa sau kỳ
                     </p>
                   ) : (
-                    <div className="border border-indigo-200 rounded-md overflow-hidden bg-white max-h-48 overflow-y-auto">
+                    <div className="border border-indigo-200 rounded-md overflow-hidden bg-white max-h-56 overflow-y-auto">
                       <table className="w-full text-left text-[11px] border-collapse">
-                        <thead className="bg-indigo-50/70 border-b border-indigo-100 sticky top-0">
+                        <thead className="bg-indigo-50/70 border-b border-indigo-100 sticky top-0 z-10">
                           <tr>
-                            <th className="py-1.5 px-2 font-semibold text-indigo-800 text-center w-10 border-r border-indigo-100/50">STT</th>
+                            <th className="py-1.5 px-2 font-semibold text-indigo-800 text-center w-8 border-r border-indigo-100/50">STT</th>
                             <th className="py-1.5 px-2 font-semibold text-indigo-800">Tên bài học</th>
-                            <th className="py-1.5 px-2 font-semibold text-indigo-800 text-center w-14 border-l border-indigo-100/50">Số tiết</th>
+                            <th className="py-1.5 px-2 font-semibold text-indigo-800 text-center w-24 border-l border-indigo-100/50" title="Bấm + / - hoặc nhập số tiết">
+                              Số tiết (Sửa)
+                            </th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-indigo-50">
                           {(scopeConfig?.secondHalfLessons || []).filter(l => l.selected).map((l, idx) => (
                             <tr key={l.id} className="hover:bg-indigo-50/40">
-                              <td className="py-1 px-2 text-center text-slate-500 border-r border-indigo-50">{idx + 1}</td>
+                              <td className="py-1 px-1.5 text-center text-slate-500 border-r border-indigo-50">{idx + 1}</td>
                               <td className="py-1 px-2 text-slate-800 font-medium">{l.name}</td>
-                              <td className="py-1 px-2 text-center text-slate-700 font-semibold border-l border-indigo-50">{l.periods || 2}</td>
+                              <td className="py-1 px-1 text-center border-l border-indigo-50">
+                                <div className="inline-flex items-center justify-center gap-0.5 bg-slate-50 border border-slate-300 rounded px-1 py-0.5 shadow-2xs">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUpdateLessonPeriods(l.id, "secondHalf", (l.periods || 2) - 1)}
+                                    disabled={(l.periods || 2) <= 1}
+                                    className="w-4 h-4 rounded text-slate-600 hover:text-indigo-700 hover:bg-indigo-100 flex items-center justify-center font-bold text-xs disabled:opacity-30 cursor-pointer"
+                                    title="Giảm 1 tiết"
+                                  >
+                                    -
+                                  </button>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    max={50}
+                                    value={l.periods || 2}
+                                    onChange={(e) => handleUpdateLessonPeriods(l.id, "secondHalf", parseInt(e.target.value, 10))}
+                                    className="w-7 text-center font-bold text-indigo-900 bg-white border border-slate-200 rounded text-xs py-0.5 px-0.5 focus:ring-1 focus:ring-indigo-500 outline-none"
+                                    title="Nhập số tiết cho bài này để lấy vào ma trận"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUpdateLessonPeriods(l.id, "secondHalf", (l.periods || 2) + 1)}
+                                    className="w-4 h-4 rounded text-slate-600 hover:text-indigo-700 hover:bg-indigo-100 flex items-center justify-center font-bold text-xs cursor-pointer"
+                                    title="Tăng 1 tiết"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -879,21 +960,52 @@ export default function ConfigTab({
                     Chưa chọn bài kiểm tra
                   </p>
                 ) : (
-                  <div className="border border-blue-200 rounded-md overflow-hidden bg-white max-h-48 overflow-y-auto">
+                  <div className="border border-blue-200 rounded-md overflow-hidden bg-white max-h-56 overflow-y-auto">
                     <table className="w-full text-left text-[11px] border-collapse">
-                      <thead className="bg-blue-50/70 border-b border-blue-100 sticky top-0">
+                      <thead className="bg-blue-50/70 border-b border-blue-100 sticky top-0 z-10">
                         <tr>
-                          <th className="py-1.5 px-2 font-semibold text-blue-800 text-center w-12 border-r border-blue-100/50">STT</th>
+                          <th className="py-1.5 px-2 font-semibold text-blue-800 text-center w-8 border-r border-blue-100/50">STT</th>
                           <th className="py-1.5 px-2 font-semibold text-blue-800">Tên bài học</th>
-                          <th className="py-1.5 px-2 font-semibold text-blue-800 text-center w-16 border-l border-blue-100/50">Số tiết</th>
+                          <th className="py-1.5 px-2 font-semibold text-blue-800 text-center w-24 border-l border-blue-100/50" title="Bấm + / - hoặc nhập số tiết">
+                            Số tiết (Sửa)
+                          </th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-blue-50">
                         {(scopeConfig?.firstHalfLessons || []).filter(l => l.selected).map((l, idx) => (
                           <tr key={l.id} className="hover:bg-blue-50/40">
-                            <td className="py-1 px-2 text-center text-slate-500 border-r border-blue-50">{idx + 1}</td>
+                            <td className="py-1 px-1.5 text-center text-slate-500 border-r border-blue-50">{idx + 1}</td>
                             <td className="py-1 px-2 text-slate-800 font-medium">{l.name}</td>
-                            <td className="py-1 px-2 text-center text-slate-700 font-semibold border-l border-blue-50">{l.periods || 2}</td>
+                            <td className="py-1 px-1 text-center border-l border-blue-50">
+                              <div className="inline-flex items-center justify-center gap-0.5 bg-slate-50 border border-slate-300 rounded px-1 py-0.5 shadow-2xs">
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateLessonPeriods(l.id, "firstHalf", (l.periods || 2) - 1)}
+                                  disabled={(l.periods || 2) <= 1}
+                                  className="w-4 h-4 rounded text-slate-600 hover:text-blue-700 hover:bg-blue-100 flex items-center justify-center font-bold text-xs disabled:opacity-30 cursor-pointer"
+                                  title="Giảm 1 tiết"
+                                >
+                                  -
+                                </button>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  max={50}
+                                  value={l.periods || 2}
+                                  onChange={(e) => handleUpdateLessonPeriods(l.id, "firstHalf", parseInt(e.target.value, 10))}
+                                  className="w-7 text-center font-bold text-blue-900 bg-white border border-slate-200 rounded text-xs py-0.5 px-0.5 focus:ring-1 focus:ring-blue-500 outline-none"
+                                  title="Nhập số tiết cho bài này để lấy vào ma trận"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateLessonPeriods(l.id, "firstHalf", (l.periods || 2) + 1)}
+                                  className="w-4 h-4 rounded text-slate-600 hover:text-blue-700 hover:bg-blue-100 flex items-center justify-center font-bold text-xs cursor-pointer"
+                                  title="Tăng 1 tiết"
+                                >
+                                  +
+                                </button>
+                              </div>
+                            </td>
                           </tr>
                         ))}
                       </tbody>
