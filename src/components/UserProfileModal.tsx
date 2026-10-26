@@ -85,8 +85,9 @@ export default function UserProfileModal({
 
   useEffect(() => {
     if (isOpen) {
-      setUsername(activeAccount?.username || activeAccount?.id || "");
-      setCustomerName(activeAccount?.customerName || "");
+      const currentName = activeAccount?.username || activeAccount?.customerName || activeAccount?.id || "";
+      setUsername(currentName);
+      setCustomerName(currentName);
       setPhone(activeAccount?.phone || "");
       setNotes(activeAccount?.notes || "");
       setAvatar(activeAccount?.avatar || "");
@@ -207,8 +208,9 @@ export default function UserProfileModal({
       setErrorMessage("Bạn chưa đăng nhập. Vui lòng đăng nhập tài khoản trước khi cập nhật!");
       return;
     }
-    if (!customerName.trim()) {
-      setErrorMessage("Vui lòng nhập tên hiển thị.");
+    const cleanName = username.trim() || customerName.trim();
+    if (!cleanName) {
+      setErrorMessage("Vui lòng nhập Tên đăng nhập.");
       return;
     }
 
@@ -223,15 +225,15 @@ export default function UserProfileModal({
       const result = await clientUpdateProfile(
         accountId,
         deviceId,
-        customerName.trim(),
+        cleanName,
         phone.trim(),
         notes.trim(),
         avatar,
-        username.trim()
+        cleanName
       );
 
       if (result.success && result.account) {
-        setSuccessMessage("✓ Đã cập nhật ảnh đại diện, tên đăng nhập và tên hiển thị thành công!");
+        setSuccessMessage("✓ Đã cập nhật thông tin tài khoản thành công!");
         onUpdateSuccess(result.account);
         setTimeout(() => {
           onClose();
@@ -240,8 +242,8 @@ export default function UserProfileModal({
         // Still save locally for immediate UI update even if offline
         const localUpdated = {
           ...activeAccount,
-          username: username.trim() || activeAccount.username || activeAccount.id,
-          customerName: customerName.trim(),
+          username: cleanName,
+          customerName: cleanName,
           phone: phone.trim(),
           notes: notes.trim(),
           avatar: avatar
@@ -257,8 +259,8 @@ export default function UserProfileModal({
     } catch {
       const localUpdated = {
         ...activeAccount,
-        username: username.trim() || activeAccount.username || activeAccount.id,
-        customerName: customerName.trim(),
+        username: cleanName,
+        customerName: cleanName,
         phone: phone.trim(),
         notes: notes.trim(),
         avatar: avatar
@@ -525,47 +527,23 @@ export default function UserProfileModal({
             </div>
           </div>
 
-          {/* 1. Username Input (Tên đăng nhập riêng) */}
+          {/* Username Input (Tên đăng nhập) */}
           <div className="space-y-1.5">
-            <label className="block text-xs font-bold text-slate-700 flex items-center justify-between">
-              <span className="flex items-center gap-1">
-                <User className="w-3.5 h-3.5 text-indigo-600" />
-                1. Tên đăng nhập riêng (Username):
-              </span>
-              <span className="text-[10.5px] text-indigo-600 font-semibold bg-indigo-50 px-1.5 py-0.5 rounded">Dùng để đăng nhập</span>
+            <label className="block text-xs font-bold text-slate-700 flex items-center gap-1">
+              <User className="w-3.5 h-3.5 text-blue-600" />
+              Tên đăng nhập (*):
             </label>
             <input
               type="text"
               value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="Ví dụ: cothao_tinhoc, admin..."
-              className="w-full px-3.5 py-2 bg-indigo-50/30 border border-indigo-200 rounded-xl text-xs font-bold text-indigo-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all shadow-xs"
-            />
-            <p className="text-[11px] text-slate-500">
-              Tên đăng nhập riêng dùng khi đăng nhập vào hệ thống (khác với Tên hiển thị).
-            </p>
-          </div>
-
-          {/* 2. Customer Name Input (Tên hiển thị riêng) */}
-          <div className="space-y-1.5">
-            <label className="block text-xs font-bold text-slate-700 flex items-center justify-between">
-              <span className="flex items-center gap-1">
-                <Edit3 className="w-3.5 h-3.5 text-blue-600" />
-                2. Tên hiển thị riêng / Họ tên giáo viên:
-              </span>
-              <span className="text-[10.5px] text-blue-600 font-semibold bg-blue-50 px-1.5 py-0.5 rounded">Hiện trên giao diện</span>
-            </label>
-            <input
-              type="text"
-              value={customerName}
-              onChange={(e) => setCustomerName(e.target.value)}
-              placeholder="Ví dụ: Thầy Hoàng Văn Đình Khoa"
+              onChange={(e) => {
+                setUsername(e.target.value);
+                setCustomerName(e.target.value);
+              }}
+              placeholder="Nhập tên đăng nhập..."
               className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all shadow-xs"
               autoFocus
             />
-            <p className="text-[11px] text-slate-500">
-              Tên hiển thị xuất hiện trên thanh công cụ, hồ sơ và mục Người ra đề.
-            </p>
           </div>
 
           {/* School / Unit / Notes */}

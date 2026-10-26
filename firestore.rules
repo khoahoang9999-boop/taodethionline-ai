@@ -10,7 +10,11 @@ service cloud.firestore {
     match /deleted_accounts/{id} {
       allow read, write: if true;
     }
+    match /saved_exams/{id} {
+      allow read, write: if true;
+    }
+    match /saved_study_guides/{id} {
+      allow read, write: if true;
+    }
   }
 }
-
-

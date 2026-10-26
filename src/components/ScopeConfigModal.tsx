@@ -50,6 +50,9 @@ export interface CustomLessonConfig {
 
 export interface ScopeConfigData {
   mode: "default" | "custom";
+  subject?: string;
+  grade?: string;
+  period?: string;
   firstHalfLessons: CustomLessonConfig[];
   secondHalfLessons: CustomLessonConfig[];
   quickNoteText?: string;
@@ -67,22 +70,100 @@ interface ScopeConfigModalProps {
   onSaveScope: (newConfig: ScopeConfigData) => void;
 }
 
-export function getDefaultScopeForPeriod(subject: string, grade: string, period: string): ScopeConfigData {
-  const isCuoiKy = period.includes("Cuối");
-  const isHk1 = period.includes("I") && !period.includes("II");
+const STANDARD_CURRICULUM_MAP: Record<
+  string,
+  Record<
+    string,
+    {
+      hk1First: string[];
+      hk1Second: string[];
+      hk2First: string[];
+      hk2Second: string[];
+    }
+  >
+> = {
+  "Tin học": {
+    "6": {
+      hk1First: ["g6_b1", "g6_b2", "g6_b3", "g6_b4", "g6_b5"],
+      hk1Second: ["g6_b6", "g6_b7", "g6_b8", "g6_b9"],
+      hk2First: ["g6_b10", "g6_b11", "g6_b12", "g6_b13"],
+      hk2Second: ["g6_b14", "g6_b15", "g6_b16", "g6_b17"],
+    },
+    "7": {
+      hk1First: ["g7_b1", "g7_b2", "g7_b3", "g7_b4", "g7_b5"],
+      hk1Second: ["g7_b6", "g7_b7", "g7_b8", "g7_b9"],
+      hk2First: ["g7_b10", "g7_b11", "g7_b12", "g7_b13"],
+      hk2Second: ["g7_b14", "g7_b15", "g7_b16"],
+    },
+    "8": {
+      hk1First: ["g8_b1", "g8_b2", "g8_b3", "g8_b4"],
+      hk1Second: ["g8_b5", "g8_b6", "g8_b7", "g8_b8a", "g8_b9a"],
+      hk2First: ["g8_b10a", "g8_b11a", "g8_b12", "g8_b13"],
+      hk2Second: ["g8_b14", "g8_b15", "g8_b16"],
+    },
+    "9": {
+      hk1First: ["g9_b1", "g9_b2", "g9_b3", "g9_b4"],
+      hk1Second: ["g9_b5", "g9_b6", "g9_b7", "g9_b8"],
+      hk2First: ["g9_b9a", "g9_b10a", "g9_b11a", "g9_b12a", "g9_b13a"],
+      hk2Second: ["g9_b14", "g9_b15", "g9_b16", "g9_b17"],
+    },
+  },
+  "Toán học": {
+    "6": {
+      hk1First: ["m6_b1", "m6_b2", "m6_b3", "m6_b4", "m6_b5", "m6_b6", "m6_b7", "m6_b8", "m6_b9", "m6_b10", "m6_b18", "m6_b19"],
+      hk1Second: ["m6_b11", "m6_b12", "m6_b13", "m6_b14", "m6_b15", "m6_b16", "m6_b17", "m6_b20", "m6_b21", "m6_b22"],
+      hk2First: ["m6_b23", "m6_b24", "m6_b25", "m6_b26", "m6_b27", "m6_b32", "m6_b33", "m6_b34", "m6_b35"],
+      hk2Second: ["m6_b28", "m6_b29", "m6_b30", "m6_b31", "m6_b36", "m6_b37", "m6_b38", "m6_b39", "m6_b40", "m6_b41", "m6_b42", "m6_b43"],
+    },
+    "7": {
+      hk1First: ["m7_b1", "m7_b2", "m7_b3", "m7_b4", "m7_b5", "m7_b6", "m7_b7", "m7_b8", "m7_b9", "m7_b10", "m7_b11"],
+      hk1Second: ["m7_b12", "m7_b13", "m7_b14", "m7_b15", "m7_b16", "m7_b17", "m7_b18", "m7_b19"],
+      hk2First: ["m7_b20", "m7_b21", "m7_b22", "m7_b23", "m7_b24", "m7_b25", "m7_b31", "m7_b32", "m7_b33"],
+      hk2Second: ["m7_b26", "m7_b27", "m7_b28", "m7_b29", "m7_b30", "m7_b34", "m7_b35", "m7_b36", "m7_b37"],
+    },
+    "8": {
+      hk1First: ["m8_b1", "m8_b2", "m8_b3", "m8_b4", "m8_b5", "m8_b6", "m8_b7", "m8_b8", "m8_b10", "m8_b11", "m8_b12"],
+      hk1Second: ["m8_b9", "m8_b13", "m8_b14", "m8_b15", "m8_b16", "m8_b17", "m8_b18", "m8_b19", "m8_b20"],
+      hk2First: ["m8_b21", "m8_b22", "m8_b23", "m8_b24", "m8_b33", "m8_b34", "m8_b35"],
+      hk2Second: ["m8_b25", "m8_b26", "m8_b27", "m8_b28", "m8_b29", "m8_b30", "m8_b31", "m8_b32", "m8_b36", "m8_b37", "m8_b38", "m8_b39"],
+    },
+    "9": {
+      hk1First: ["m9_b1", "m9_b2", "m9_b3", "m9_b4", "m9_b5", "m9_b6", "m9_b11", "m9_b12"],
+      hk1Second: ["m9_b7", "m9_b8", "m9_b9", "m9_b10", "m9_b13", "m9_b14", "m9_b15", "m9_b16", "m9_b17"],
+      hk2First: ["m9_b18", "m9_b19", "m9_b20", "m9_b21", "m9_b27", "m9_b28"],
+      hk2Second: ["m9_b22", "m9_b23", "m9_b24", "m9_b25", "m9_b26", "m9_b29", "m9_b30", "m9_b31", "m9_b32"],
+    },
+  },
+};
 
-  if (subject !== "Tin học" && subject !== "Toán học") {
+export function getDefaultScopeForPeriod(subject: string, grade: string, period: string): ScopeConfigData {
+  const cleanSubject = subject?.toLowerCase().trim().includes("toán") ? "Toán học" : "Tin học";
+  const cleanGrade = ["6", "7", "8", "9"].includes(String(grade).trim()) ? String(grade).trim() : "6";
+  const cleanPeriod = (period || "Giữa học kỳ I").trim();
+
+  const isCuoiKy = cleanPeriod.toLowerCase().includes("cuối");
+  const isHk2 =
+    cleanPeriod.includes("II") ||
+    cleanPeriod.includes("2") ||
+    cleanPeriod.toLowerCase().includes("kỳ ii") ||
+    cleanPeriod.toLowerCase().includes("kì ii");
+  const isHk1 = !isHk2;
+
+  if (subject !== "Tin học" && subject !== "Toán học" && !subject?.toLowerCase().includes("toán") && !subject?.toLowerCase().includes("tin")) {
     return {
       mode: "default",
+      subject,
+      grade: cleanGrade,
+      period: cleanPeriod,
       firstHalfLessons: [],
       secondHalfLessons: [],
       quickNoteText: ""
     };
   }
 
-  const tb = subject.toLowerCase().trim().includes("toán")
-    ? (ALL_MATH_TEXTBOOKS[grade] || ALL_MATH_TEXTBOOKS["6"] || { topics: [] })
-    : (ALL_TEXTBOOKS[grade] || ALL_TEXTBOOKS["6"] || { topics: [] });
+  const tb = cleanSubject === "Toán học"
+    ? (ALL_MATH_TEXTBOOKS[cleanGrade] || ALL_MATH_TEXTBOOKS["6"] || { topics: [] })
+    : (ALL_TEXTBOOKS[cleanGrade] || ALL_TEXTBOOKS["6"] || { topics: [] });
 
   const allLessons: Lesson[] = [];
   if (tb && Array.isArray(tb.topics)) {
@@ -93,143 +174,23 @@ export function getDefaultScopeForPeriod(subject: string, grade: string, period:
     });
   }
 
+  const mapForGrade = STANDARD_CURRICULUM_MAP[cleanSubject]?.[cleanGrade];
+  const firstIds = new Set<string>(
+    mapForGrade ? (isHk1 ? mapForGrade.hk1First : mapForGrade.hk2First) : []
+  );
+  const secondIds = new Set<string>(
+    mapForGrade ? (isHk1 ? mapForGrade.hk1Second : mapForGrade.hk2Second) : []
+  );
+
   const firstHalfList: CustomLessonConfig[] = [];
   const secondHalfList: CustomLessonConfig[] = [];
 
   allLessons.forEach((lesson) => {
-    const lNumStr = lesson.name.toLowerCase();
-    const tName = lesson.topicName.toLowerCase();
-    let isFirstHalf = false;
-    let isSecondHalf = false;
-    let defaultPeriods = lesson.periods || 2;
-
-    const checkBài = (nums: number[]) => nums.some(n => new RegExp(`\\bbài ${n}[a-z]?\\.`, 'i').test(lNumStr));
-    const checkCĐ = (nums: number[]) => nums.some(n => new RegExp(`\\b(chủ đề|chương) ${n}\\b`, 'i').test(tName));
-
-    if (subject.toLowerCase().trim().includes("toán")) {
-      if (isHk1) {
-        if (grade === "6") {
-          // HK1 Toán 6: Chương 1, 2, 4 là nửa đầu; Chương 3, 5 là nửa sau
-          if (checkCĐ([1, 2, 4]) || checkBài([1,2,3,4,5,6,7,8,9,10,11,12,13,19,20,21])) {
-            isFirstHalf = true;
-          } else {
-            isSecondHalf = true;
-          }
-        } else if (grade === "7") {
-          // HK1 Toán 7: Giữa HK1 gồm Chương 1, 2, 3; Cuối HK1 gồm Chương 4, 5
-          if (checkCĐ([1, 2, 3])) {
-            isFirstHalf = true;
-          } else {
-            isSecondHalf = true;
-          }
-        } else if (grade === "8") {
-          // HK1 Toán 8: Chương 1, 2, 3 là nửa đầu; Chương 4, 5 là nửa sau
-          if (checkCĐ([1, 2, 3]) || checkBài([1,2,3,4,5,6,7])) {
-            isFirstHalf = true;
-          } else {
-            isSecondHalf = true;
-          }
-        } else {
-          // HK1 Toán 9: Chương 1, 2, 4 là nửa đầu; Chương 3, 5 là nửa sau
-          if (checkCĐ([1, 2, 4]) || checkBài([1,2,3,4,7,8])) {
-            isFirstHalf = true;
-          } else {
-            isSecondHalf = true;
-          }
-        }
-      } else {
-        // HK2 Toán
-        if (grade === "6") {
-          if (checkCĐ([6, 8]) || checkBài([24,25,26,27,28,33,34,35])) {
-            isFirstHalf = true;
-          } else {
-            isSecondHalf = true;
-          }
-        } else if (grade === "7") {
-          // HK2 Toán 7: Giữa HK2 gồm Chương 6, 8 và một phần Chương 7, Chương 9 (Bài 20-25, 29-33)
-          // Để đơn giản, ta gán Chương 6, 7, 8 cho nửa đầu; Chương 9, 10 cho nửa sau,
-          // hoặc cụ thể các bài.
-          if (checkCĐ([6, 8]) || checkBài([20,21,22,23,24,25,29,30,31,32,33])) {
-            isFirstHalf = true;
-          } else {
-            isSecondHalf = true;
-          }
-        } else if (grade === "8") {
-          if (checkCĐ([6, 7]) || checkBài([11,12,13,14,16])) {
-            isFirstHalf = true;
-          } else {
-            isSecondHalf = true;
-          }
-        } else {
-          // HK2 Toán 9
-          if (checkCĐ([6]) || checkBài([11,12,15])) {
-            isFirstHalf = true;
-          } else {
-            isSecondHalf = true;
-          }
-        }
-      }
-    } else {
-      // Môn Tin học
-      if (isHk1) {
-        if (grade === "8") {
-          if (checkBài([1,2,3,4]) || checkCĐ([1,2,3])) {
-            isFirstHalf = true;
-          } else if (checkBài([5,6,7,8]) || checkCĐ([4])) {
-            isSecondHalf = true;
-          }
-        } else if (grade === "7") {
-          if (checkBài([1,2,3,4]) || checkCĐ([1,2,3])) {
-            isFirstHalf = true;
-          } else if (checkBài([5,6,7,8,9]) || checkCĐ([4])) {
-            isSecondHalf = true;
-          }
-        } else if (grade === "6") {
-          if (checkBài([1,2,3,4,5]) || checkCĐ([1,2])) {
-            isFirstHalf = true;
-          } else if (checkBài([6,7,8]) || checkCĐ([3])) {
-            isSecondHalf = true;
-          }
-        } else {
-          // Grade 9
-          if (checkBài([1,2,3,4,5]) || checkCĐ([1,2,3])) {
-            isFirstHalf = true;
-          } else if (checkBài([6,7,8,9,10]) || checkCĐ([4])) {
-            isSecondHalf = true;
-          }
-        }
-      } else {
-        // HK2 Tin học
-        if (grade === "8") {
-          if (checkBài([9,10,11,12])) {
-            isFirstHalf = true;
-          } else if (checkBài([13,14,15,16])) {
-            isSecondHalf = true;
-          }
-        } else if (grade === "7") {
-          if (checkBài([10,11,12])) {
-            isFirstHalf = true;
-          } else if (checkBài([13,14,15,16])) {
-            isSecondHalf = true;
-          }
-        } else if (grade === "6") {
-          if (checkBài([9,10,11,12])) {
-            isFirstHalf = true;
-          } else if (checkBài([13,14,15,16,17])) {
-            isSecondHalf = true;
-          }
-        } else {
-          if (checkBài([11,12])) {
-            isFirstHalf = true;
-          } else if (checkBài([13,14,15,16])) {
-            isSecondHalf = true;
-          }
-        }
-      }
-    }
+    const isFirstHalf = firstIds.has(lesson.id);
+    const isSecondHalf = secondIds.has(lesson.id);
+    const defaultPeriods = lesson.periods || 2;
 
     if (!isCuoiKy) {
-      // Giữa kì: firstHalf list contains active lessons
       if (isFirstHalf) {
         firstHalfList.push({
           id: lesson.id,
@@ -243,7 +204,6 @@ export function getDefaultScopeForPeriod(subject: string, grade: string, period:
         });
       }
     } else {
-      // Cuối kì: both firstHalf (30%) and secondHalf (70%)
       if (isFirstHalf) {
         firstHalfList.push({
           id: lesson.id,
@@ -273,10 +233,103 @@ export function getDefaultScopeForPeriod(subject: string, grade: string, period:
 
   return {
     mode: "default",
+    subject: cleanSubject,
+    grade: cleanGrade,
+    period: cleanPeriod,
     firstHalfLessons: firstHalfList,
     secondHalfLessons: secondHalfList,
     quickNoteText: ""
   };
+}
+
+export function isScopeMatchingSelection(
+  scope: ScopeConfigData | null | undefined,
+  subject: string,
+  grade: string,
+  period: string
+): boolean {
+  if (!scope) return false;
+  const cleanSubject = subject?.toLowerCase().trim().includes("toán") ? "Toán học" : "Tin học";
+  const cleanGrade = String(grade || "6").trim();
+  const cleanPeriod = (period || "Giữa học kỳ I").trim();
+  const isCuoiKy = cleanPeriod.toLowerCase().includes("cuối");
+
+  if (scope.subject && scope.subject !== cleanSubject) return false;
+  if (scope.grade && String(scope.grade).trim() !== cleanGrade) return false;
+  if (scope.period && scope.period.trim() !== cleanPeriod) return false;
+
+  const firstList = scope.firstHalfLessons || [];
+  const secondList = scope.secondHalfLessons || [];
+  if (firstList.length === 0 && secondList.length === 0) return false;
+
+  // Check if Cuối kỳ vs Giữa kỳ structure matches
+  if (isCuoiKy && secondList.length === 0) return false;
+  if (!isCuoiKy && secondList.length > 0) return false;
+
+  // Verify standard lesson ID prefix (e.g. g6_, g7_, m6_, m7_) and semester lesson membership
+  const expectedPrefix = cleanSubject === "Toán học" ? `m${cleanGrade}_` : `g${cleanGrade}_`;
+  const allItems = [...firstList, ...secondList];
+  for (const item of allItems) {
+    const baseId = String(item.id || "").split("_").slice(0, 2).join("_") + "_";
+    if (/^[gm][6-9]_/.test(baseId) && baseId !== expectedPrefix) {
+      return false;
+    }
+  }
+
+  // If scope has no explicit period tag, verify firstHalfLessons belong to the right semester (HK1 vs HK2)
+  if (!scope.period) {
+    const defScope = getDefaultScopeForPeriod(cleanSubject, cleanGrade, cleanPeriod);
+    const defFirstIds = new Set(defScope.firstHalfLessons.map(l => l.id));
+    const hasOverlap = firstList.some(l => {
+      const rawId = String(l.id || "").replace(/_(first|second).*$/, "");
+      return defFirstIds.has(rawId);
+    });
+    if (!hasOverlap) return false;
+  }
+
+  return true;
+}
+
+export function getMatchingScopeForSelection(
+  subject: string,
+  grade: string,
+  period: string
+): ScopeConfigData {
+  const cleanSubject = subject?.toLowerCase().trim().includes("toán") ? "Toán học" : "Tin học";
+  const cleanGrade = String(grade || "6").trim();
+  const cleanPeriod = (period || "Giữa học kỳ I").trim();
+
+  try {
+    const raw = localStorage.getItem("TO_KTT_SAVED_PPCT_LIST_V2");
+    if (raw) {
+      const savedList = JSON.parse(raw);
+      if (Array.isArray(savedList)) {
+        const matched = savedList.find(
+          (r: any) =>
+            r &&
+            r.subject === cleanSubject &&
+            String(r.grade).trim() === cleanGrade &&
+            String(r.period).trim() === cleanPeriod &&
+            r.scopeConfig &&
+            Array.isArray(r.scopeConfig.firstHalfLessons) &&
+            r.scopeConfig.firstHalfLessons.length > 0
+        );
+        if (matched) {
+          return {
+            ...JSON.parse(JSON.stringify(matched.scopeConfig)),
+            mode: "custom",
+            subject: cleanSubject,
+            grade: cleanGrade,
+            period: cleanPeriod,
+            savedPpctName: matched.name,
+            savedPpctId: matched.id,
+          };
+        }
+      }
+    }
+  } catch {}
+
+  return getDefaultScopeForPeriod(cleanSubject, cleanGrade, cleanPeriod);
 }
 
 export default function ScopeConfigModal({
@@ -324,22 +377,22 @@ export default function ScopeConfigModal({
   // Sync state when opened or grade/period/subject changed
   useEffect(() => {
     if (isOpen) {
-      setMode(scopeConfig.mode || "default");
-      const isMath = subject.toLowerCase().trim().includes("toán");
-      const hasMismatchedLessons = scopeConfig.firstHalfLessons?.some(l => 
-        isMath ? l.topicName?.toLowerCase().includes("chủ đề") : l.topicName?.toLowerCase().includes("chương")
-      );
-      if (scopeConfig.firstHalfLessons && scopeConfig.firstHalfLessons.length > 0 && !hasMismatchedLessons) {
-        setFirstHalf(JSON.parse(JSON.stringify(scopeConfig.firstHalfLessons)));
+      if (isScopeMatchingSelection(scopeConfig, subject, grade, period)) {
+        setMode(scopeConfig.mode || "default");
+        setFirstHalf(JSON.parse(JSON.stringify(scopeConfig.firstHalfLessons || [])));
         setSecondHalf(JSON.parse(JSON.stringify(scopeConfig.secondHalfLessons || [])));
+        setQuickInputText(scopeConfig.quickNoteText || "");
+        setCurrentPpctName(scopeConfig.savedPpctName || "");
+        setCurrentPpctId(scopeConfig.savedPpctId || "");
       } else {
-        const def = getDefaultScopeForPeriod(subject, grade, period);
-        setFirstHalf(def.firstHalfLessons);
-        setSecondHalf(def.secondHalfLessons);
+        const matched = getMatchingScopeForSelection(subject, grade, period);
+        setMode(matched.mode || "default");
+        setFirstHalf(matched.firstHalfLessons);
+        setSecondHalf(matched.secondHalfLessons);
+        setQuickInputText(matched.quickNoteText || "");
+        setCurrentPpctName(matched.savedPpctName || "");
+        setCurrentPpctId(matched.savedPpctId || "");
       }
-      setQuickInputText(scopeConfig.quickNoteText || "");
-      setCurrentPpctName(scopeConfig.savedPpctName || "");
-      setCurrentPpctId(scopeConfig.savedPpctId || "");
       loadSavedPresets();
     }
   }, [isOpen, grade, period, scopeConfig, subject]);
@@ -518,6 +571,9 @@ export default function ScopeConfigModal({
       updatedAt: new Date().toISOString(),
       scopeConfig: {
         mode: "custom",
+        subject,
+        grade,
+        period,
         firstHalfLessons: firstHalf,
         secondHalfLessons: secondHalf,
         quickNoteText: quickInputText
@@ -618,6 +674,9 @@ export default function ScopeConfigModal({
           id: `ppct_excel_imp_${Date.now()}`,
           scopeConfig: {
             mode: "custom",
+            subject: parseRes.detectedSubject || subject,
+            grade: parseRes.detectedGrade || grade,
+            period: period,
             firstHalfLessons: parseRes.firstHalfLessons,
             secondHalfLessons: parseRes.secondHalfLessons,
             savedPpctName: newPresetName
@@ -640,6 +699,9 @@ export default function ScopeConfigModal({
   const handleSaveAndApply = () => {
     onSaveScope({
       mode,
+      subject,
+      grade,
+      period,
       firstHalfLessons: firstHalf,
       secondHalfLessons: secondHalf,
       quickNoteText: quickInputText,

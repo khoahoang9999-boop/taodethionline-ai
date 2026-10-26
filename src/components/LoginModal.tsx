@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Lock, X, Key, ShieldAlert, Phone, Sparkles, CheckCircle2, UserCheck, AlertCircle, Edit3 } from "lucide-react";
+import { Lock, X, Key, ShieldAlert, Phone, Sparkles, CheckCircle2, UserCheck, AlertCircle, Edit3, Eye, EyeOff } from "lucide-react";
 import { getDeviceId } from "../lib/device-id";
 import { clientLogin, clientUpdateProfile } from "../lib/client-auth";
 
@@ -19,12 +19,10 @@ export default function LoginModal({
   const [loginUsername, setLoginUsername] = useState(
     () => localStorage.getItem("khaothi_account_username") || localStorage.getItem("khaothi_account_name") || ""
   );
-  const [displayName, setDisplayName] = useState(
-    () => localStorage.getItem("khaothi_account_display_name") || ""
-  );
   const [code, setCode] = useState(
-    () => localStorage.getItem("khaothi_account_password") || localStorage.getItem("khaothi_account_code") || ""
+    () => localStorage.getItem("khaothi_account_password") || ""
   );
+  const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -32,11 +30,13 @@ export default function LoginModal({
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!loginUsername.trim()) {
+    const cleanUser = loginUsername.replace(/^@+/, "").trim();
+    const cleanPass = code.trim();
+    if (!cleanUser) {
       setErrorMessage("Vui lòng nhập Tên đăng nhập.");
       return;
     }
-    if (!code.trim()) {
+    if (!cleanPass) {
       setErrorMessage("Vui lòng nhập Mật khẩu.");
       return;
     }
@@ -46,7 +46,7 @@ export default function LoginModal({
 
     try {
       const deviceId = getDeviceId();
-      const data = await clientLogin(loginUsername.trim(), code.trim(), deviceId);
+      const data = await clientLogin(cleanUser, cleanPass, deviceId);
 
       if (!data || !data.success) {
         setErrorMessage(
@@ -57,36 +57,13 @@ export default function LoginModal({
         return;
       }
 
-      let finalAccount = { ...data.account };
-
-      // Nếu giáo viên có nhập Tên hiển thị riêng lúc đăng nhập thì cập nhật ngay Tên hiển thị
-      if (displayName.trim() && displayName.trim() !== finalAccount.customerName) {
-        try {
-          const profRes = await clientUpdateProfile(
-            finalAccount.id,
-            deviceId,
-            displayName.trim(),
-            finalAccount.phone,
-            finalAccount.notes,
-            finalAccount.avatar,
-            finalAccount.username || loginUsername.trim()
-          );
-          if (profRes && profRes.success && profRes.account) {
-            finalAccount = { ...finalAccount, ...profRes.account };
-          } else {
-            finalAccount.customerName = displayName.trim();
-          }
-        } catch {
-          finalAccount.customerName = displayName.trim();
-        }
-      }
+      const finalAccount = { ...data.account };
 
       // Save token & data to localStorage
-      localStorage.setItem("khaothi_account_username", finalAccount.username || loginUsername.trim());
-      localStorage.setItem("khaothi_account_display_name", finalAccount.customerName || "");
-      localStorage.setItem("khaothi_account_name", finalAccount.customerName || loginUsername.trim());
+      localStorage.setItem("khaothi_account_username", finalAccount.username || finalAccount.customerName || cleanUser);
+      localStorage.setItem("khaothi_account_name", finalAccount.customerName || finalAccount.username || cleanUser);
       localStorage.setItem("khaothi_account_code", finalAccount.id);
-      localStorage.setItem("khaothi_account_password", code.trim());
+      localStorage.setItem("khaothi_account_password", finalAccount.password || cleanPass);
       localStorage.setItem("khaothi_account_data", JSON.stringify(finalAccount));
 
       onLoginSuccess(finalAccount);
@@ -140,9 +117,8 @@ export default function LoginModal({
           <form onSubmit={handleLogin} className="space-y-3.5">
             {/* 1. Login Username Input */}
             <div className="space-y-1">
-              <label className="block text-xs font-bold text-slate-700 flex items-center justify-between">
-                <span>1. Tên đăng nhập (*):</span>
-                <span className="text-[10.5px] text-indigo-600 font-medium">Dùng để xác thực</span>
+              <label className="block text-xs font-bold text-slate-700">
+                1. Tên đăng nhập (*):
               </label>
               <div className="relative">
                 <input
@@ -152,52 +128,39 @@ export default function LoginModal({
                     setLoginUsername(e.target.value);
                     setErrorMessage(null);
                   }}
-                  placeholder="Ví dụ: admin, cothao_tinhoc..."
-                  className="w-full pl-9 pr-3 py-2 text-sm font-semibold text-indigo-950 bg-indigo-50/30 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:bg-white outline-none"
+                  placeholder="Nhập tên đăng nhập..."
+                  className="w-full pl-9 pr-3 py-2 text-sm font-semibold text-slate-800 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                   autoFocus
                 />
-                <UserCheck className="w-4 h-4 text-indigo-500 absolute left-3 top-2.5" />
+                <UserCheck className="w-4 h-4 text-blue-500 absolute left-3 top-2.5" />
               </div>
             </div>
 
-            {/* 2. Separate Display Name Input */}
-            <div className="space-y-1">
-              <label className="block text-xs font-bold text-slate-700 flex items-center justify-between">
-                <span>2. Tên hiển thị riêng (Họ và tên giáo viên):</span>
-                <span className="text-[10.5px] text-blue-600 font-medium">Hiện trên giao diện</span>
-              </label>
-              <div className="relative">
-                <input
-                  type="text"
-                  value={displayName}
-                  onChange={(e) => {
-                    setDisplayName(e.target.value);
-                    setErrorMessage(null);
-                  }}
-                  placeholder="Ví dụ: Thầy Nguyễn Văn A (để trống giữ tên hiện tại)"
-                  className="w-full pl-9 pr-3 py-2 text-sm font-semibold text-slate-800 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                />
-                <Edit3 className="w-4 h-4 text-blue-500 absolute left-3 top-2.5" />
-              </div>
-            </div>
-
-            {/* 3. Password Input */}
+            {/* 2. Password Input */}
             <div className="space-y-1">
               <label className="block text-xs font-bold text-slate-700">
-                3. Mật khẩu (*):
+                2. Mật khẩu (*):
               </label>
               <div className="relative">
                 <input
-                  type="password"
+                  type={showPassword ? "text" : "password"}
                   value={code}
                   onChange={(e) => {
                     setCode(e.target.value);
                     setErrorMessage(null);
                   }}
                   placeholder="Nhập mật khẩu của bạn..."
-                  className="w-full pl-9 pr-3 py-2 text-sm font-bold text-slate-800 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                  className="w-full pl-9 pr-10 py-2 text-sm font-bold text-slate-800 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                 />
                 <Key className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-600 p-0.5 rounded transition-colors cursor-pointer"
+                  title={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
               </div>
               <p className="text-[10.5px] text-slate-500 italic">Nhập tên đăng nhập và mật khẩu được Admin cấp.</p>
             </div>

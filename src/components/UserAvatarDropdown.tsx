@@ -62,7 +62,7 @@ export default function UserAvatarDropdown({
     };
   }, [isOpen]);
 
-  const displayName = currentUser?.customerName || currentUser?.id || "Khách (Chưa đăng nhập)";
+  const displayName = currentUser?.username || currentUser?.customerName || currentUser?.id || "Khách (Chưa đăng nhập)";
   const userCode = currentUser?.id || "Chưa có mã";
   const userAvatarSrc =
     currentUser?.avatar ||
@@ -179,11 +179,6 @@ export default function UserAvatarDropdown({
                     </span>
                   )}
                 </div>
-                {currentUser && (
-                  <p className="text-[10.5px] text-indigo-700 font-semibold mt-0.5 truncate">
-                    Tên đăng nhập: @{currentUser.username || currentUser.id}
-                  </p>
-                )}
                 {isAdmin ? (
                   <p className="text-[10px] text-amber-600 font-bold mt-0.5 flex items-center gap-1">
                     🌟 Tài khoản Quản trị cấp cao
@@ -291,7 +286,7 @@ export default function UserAvatarDropdown({
               </div>
             </button>
 
-            {/* 2. Hồ sơ & Đổi tên hiển thị */}
+            {/* 2. Hồ sơ tài khoản */}
             <button
               type="button"
               onClick={() => {
@@ -308,8 +303,8 @@ export default function UserAvatarDropdown({
                 <Edit3 className="w-3.5 h-3.5" />
               </div>
               <div className="flex-1">
-                <div className="text-slate-800 font-bold group-hover:text-blue-700">Hồ sơ & Đổi tên hiển thị</div>
-                <div className="text-[11px] text-slate-400 font-normal">Cập nhật họ tên giáo viên, trường học</div>
+                <div className="text-slate-800 font-bold group-hover:text-blue-700">Hồ sơ tài khoản</div>
+                <div className="text-[11px] text-slate-400 font-normal">Cập nhật tên đăng nhập, đơn vị công tác</div>
               </div>
             </button>
 

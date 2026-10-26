@@ -19,7 +19,8 @@ import {
   Check,
   Plus,
   X,
-  KeyRound
+  KeyRound,
+  FolderArchive
 } from "lucide-react";
 import MatrixView from "./MatrixView";
 import SpecificationView from "./SpecificationView";
@@ -80,6 +81,11 @@ interface ExamWorkspaceProps {
   onOpenApiKeyModal?: () => void;
   currentUser?: any;
   onOpenLoginModal?: () => void;
+  onSwitchToStudyGuideTab?: () => void;
+  onGenerateStudyGuide?: () => void;
+  isGeneratingStudyGuide?: boolean;
+  onSaveExamRecord?: () => void;
+  onOpenStorageModal?: () => void;
 }
 
 export default function ExamWorkspace({
@@ -134,6 +140,11 @@ export default function ExamWorkspace({
   onToggleTfStatement,
   onOpenQuestionEditor,
   onOpenApiKeyModal,
+  onSwitchToStudyGuideTab,
+  onGenerateStudyGuide,
+  isGeneratingStudyGuide = false,
+  onSaveExamRecord,
+  onOpenStorageModal,
 }: ExamWorkspaceProps) {
   // If config is NOT saved: Lock screen
   if (!isConfigSaved) {
@@ -228,14 +239,40 @@ export default function ExamWorkspace({
           </span>
         </div>
 
-        <button
-          type="button"
-          onClick={onSwitchToConfigTab}
-          className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg border border-slate-700 transition-colors cursor-pointer"
-        >
-          <Settings className="w-3.5 h-3.5 text-blue-400" />
-          <span>Chỉnh sửa cấu hình</span>
-        </button>
+        <div className="flex items-center gap-2">
+          {testData && onSaveExamRecord && (
+            <button
+              type="button"
+              onClick={onSaveExamRecord}
+              className="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg shadow-sm transition-colors cursor-pointer"
+              title="Lưu hồ sơ đề thi này vào Kho Lưu Trữ"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Lưu Đề Thi</span>
+            </button>
+          )}
+
+          {onOpenStorageModal && (
+            <button
+              type="button"
+              onClick={onOpenStorageModal}
+              className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-800 hover:bg-slate-700 text-amber-300 text-xs font-bold rounded-lg border border-amber-500/30 transition-colors cursor-pointer"
+              title="Mở Kho Đề Thi & Đề Cương Đã Lưu"
+            >
+              <FolderArchive className="w-3.5 h-3.5 text-amber-400" />
+              <span>Kho Đề Đã Lưu</span>
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={onSwitchToConfigTab}
+            className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg border border-slate-700 transition-colors cursor-pointer"
+          >
+            <Settings className="w-3.5 h-3.5 text-blue-400" />
+            <span>Cấu hình</span>
+          </button>
+        </div>
       </div>
 
       {/* Workspace Split */}
@@ -420,6 +457,23 @@ export default function ExamWorkspace({
                     ) : null}
                   </button>
                 </li>
+
+                {onSwitchToStudyGuideTab && (
+                  <li>
+                    <button
+                      onClick={onSwitchToStudyGuideTab}
+                      className="w-full flex items-center justify-between p-2 rounded-md transition-colors text-left cursor-pointer text-slate-700 hover:bg-emerald-50 hover:text-emerald-900 border border-dashed border-emerald-300 bg-emerald-50/30"
+                    >
+                      <span className="flex items-center gap-2 text-[13px] min-w-0 font-semibold text-emerald-800">
+                        <Sparkles className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span className="truncate">5. Đề cương ôn tập (Bước 4)</span>
+                      </span>
+                      <span className="text-[10px] bg-emerald-600 text-white px-1.5 py-0.2 rounded font-bold shrink-0">
+                        Mở ngay ➔
+                      </span>
+                    </button>
+                  </li>
+                )}
               </ul>
             </div>
 
@@ -993,7 +1047,7 @@ export default function ExamWorkspace({
               {(activeTab === "all" || activeTab === "matrix") && (
                 <div className="space-y-4 w-full">
                   <div 
-                    className="bg-white shadow-xl rounded-sm p-6 md:p-10 border border-slate-200 text-black w-full overflow-x-auto exam-preview-document font-times"
+                    className="bg-white shadow-xl rounded-sm p-6 md:pt-[1.5cm] md:pb-[1.5cm] md:pl-[2.0cm] md:pr-[1.5cm] border border-slate-200 text-black w-full overflow-x-auto exam-preview-document font-times"
                     style={{ fontFamily: '"Times New Roman", Times, "Liberation Serif", serif' }}
                   >
                     <MatrixView
@@ -1022,12 +1076,13 @@ export default function ExamWorkspace({
               {(activeTab === "all" || activeTab === "spec") && (
                 <div className="space-y-4 w-full">
                   <div 
-                    className="bg-white shadow-xl rounded-sm p-6 md:p-10 border border-slate-200 text-black w-full overflow-x-auto exam-preview-document font-times"
+                    className="bg-white shadow-xl rounded-sm p-6 md:pt-[1.5cm] md:pb-[1.5cm] md:pl-[2.0cm] md:pr-[1.5cm] border border-slate-200 text-black w-full overflow-x-auto exam-preview-document font-times"
                     style={{ fontFamily: '"Times New Roman", Times, "Liberation Serif", serif' }}
                   >
                     <SpecificationView
                       subject={subject}
                       specification={testData.specification}
+                      matrix={testData.matrix}
                       departmentName={departmentName}
                       schoolName={schoolName}
                       schoolYear={schoolYear}
@@ -1087,7 +1142,7 @@ export default function ExamWorkspace({
                     </div>
                   ) : (
                     <div 
-                      className="bg-white shadow-xl rounded-sm p-6 md:p-10 border border-slate-200 text-black w-full overflow-x-auto exam-preview-document font-times"
+                      className="bg-white shadow-xl rounded-sm p-6 md:pt-[1.5cm] md:pb-[1.5cm] md:pl-[2.0cm] md:pr-[1.5cm] border border-slate-200 text-black w-full overflow-x-auto exam-preview-document font-times"
                       style={{ fontFamily: '"Times New Roman", Times, "Liberation Serif", serif' }}
                     >
                       <ExamPaperView
@@ -1121,7 +1176,7 @@ export default function ExamWorkspace({
                 <div className="space-y-4 w-full">
                   {isCurrentVariantGenerated && (
                     <div 
-                      className="bg-white shadow-xl rounded-sm p-6 md:p-10 border border-slate-200 text-black w-full overflow-x-auto exam-preview-document font-times"
+                      className="bg-white shadow-xl rounded-sm p-6 md:pt-[1.5cm] md:pb-[1.5cm] md:pl-[2.0cm] md:pr-[1.5cm] border border-slate-200 text-black w-full overflow-x-auto exam-preview-document font-times"
                       style={{ fontFamily: '"Times New Roman", Times, "Liberation Serif", serif' }}
                     >
                       <AnswerKeyView

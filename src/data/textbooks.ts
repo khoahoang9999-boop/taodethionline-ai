@@ -25,6 +25,422 @@ export interface TextbookGrade {
   }[];
 }
 
+export interface StandardSpecRow {
+  topic: string;
+  content: string;
+  nb_desc: string;
+  th_desc: string;
+  vd_desc: string;
+  nb_count?: number;
+  th_count?: number;
+  vd_count?: number;
+}
+
+export function formatPeriodDisplayLower(period?: string): string {
+  const raw = (period || "Giữa học kỳ I").trim();
+  return raw
+    .toLowerCase()
+    .replace(/\bii\b/g, "II")
+    .replace(/\bi\b/g, "I");
+}
+
+export const TIN_HOC_6_GIUA_HK1_SPECIFICATION: StandardSpecRow[] = [
+  {
+    topic: "Chủ đề 1. Máy tính và cộng đồng",
+    content: "Bài 1. Thông tin và dữ liệu",
+    nb_desc: [
+      "Trong các tình huống cụ thể có sẵn:",
+      "– Phân biệt được thông tin với vật mang tin.",
+      "– Nhận biết được sự khác nhau giữa thông tin và dữ liệu."
+    ].join("\n"),
+    th_desc: [
+      "– Nêu được ví dụ minh hoạ về mối quan hệ giữa thông tin và dữ liệu.",
+      "– Nêu được ví dụ minh hoạ tầm quan trọng của thông tin."
+    ].join("\n"),
+    vd_desc: "– Giải thích được máy tính và các thiết bị số là công cụ hiệu quả để thu thập, lưu trữ, xử lí và truyền thông tin. Nêu được ví dụ minh hoạ cụ thể.",
+    nb_count: 4,
+    th_count: 3,
+    vd_count: 1
+  },
+  {
+    topic: "Chủ đề 1. Máy tính và cộng đồng",
+    content: "Bài 2. Xử lí thông tin",
+    nb_desc: [
+      "– Nêu được các bước cơ bản trong xử lí thông tin."
+    ].join("\n"),
+    th_desc: [
+      "– Nêu được ví dụ minh hoạ về mối quan hệ giữa thông tin và dữ liệu.",
+      "– Nêu được ví dụ minh hoạ tầm quan trọng của thông tin."
+    ].join("\n"),
+    vd_desc: "– Giải thích được máy tính và các thiết bị số là công cụ hiệu quả để thu thập, lưu trữ, xử lí và truyền thông tin. Nêu được ví dụ minh hoạ cụ thể.",
+    nb_count: 3,
+    th_count: 2,
+    vd_count: 1
+  },
+  {
+    topic: "Chủ đề 1. Máy tính và cộng đồng",
+    content: "Bài 3. Thông tin trong máy tính",
+    nb_desc: [
+      "– Biết được bit là đơn vị nhỏ nhất trong lưu trữ thông tin.",
+      "– Nêu được tên và độ lớn (xấp xỉ theo hệ thập phân) của các đơn vị cơ bản đo dung lượng thông tin: Byte, KB, MB, GB, quy đổi được một cách gần đúng giữa các đơn vị đo lường này. Ví dụ: 1KB bằng xấp xỉ 1 ngàn byte, 1 MB xấp xỉ 1 triệu byte, 1 GB xấp xỉ 1 tỉ byte."
+    ].join("\n"),
+    th_desc: "– Giải thích được có thể biểu diễn thông tin chỉ với hai kí hiệu 0 và 1.",
+    vd_desc: "– Xác định được khả năng lưu trữ của các thiết bị nhớ thông dụng như đĩa quang, đĩa từ, đĩa cứng, USB, CD, thẻ nhớ,…",
+    nb_count: 3,
+    th_count: 3,
+    vd_count: 1
+  },
+  {
+    topic: "Chủ đề 2. Mạng máy tính và Internet",
+    content: "Bài 4. Mạng máy tính",
+    nb_desc: [
+      "– Nêu được khái niệm và lợi ích của mạng máy tính.",
+      "– Nêu được các thành phần chủ yếu của một mạng máy tính (máy tính và các thiết bị kết nối) và tên của một vài thiết bị mạng cơ bản như máy tính, cáp nối, Switch, Access Point,..."
+    ].join("\n"),
+    th_desc: "– Nêu được ví dụ cụ thể về trường hợp mạng không dây tiện dụng hơn mạng có dây.",
+    vd_desc: "",
+    nb_count: 3,
+    th_count: 2,
+    vd_count: 0
+  },
+  {
+    topic: "Chủ đề 2. Mạng máy tính và Internet",
+    content: "Bài 5. Internet",
+    nb_desc: [
+      "– Nêu được các đặc điểm và ích lợi chính của Internet."
+    ].join("\n"),
+    th_desc: "– Nêu được ví dụ cụ thể về trường hợp mạng không dây tiện dụng hơn mạng có dây.",
+    vd_desc: "",
+    nb_count: 3,
+    th_count: 2,
+    vd_count: 0
+  }
+];
+
+export function isTinHoc6GiuaKy1(subject?: string, grade?: string, period?: string): boolean {
+  const s = (subject || "Tin học").toLowerCase().trim();
+  const isTinHoc = s.includes("tin");
+  const isGrade6 = String(grade || "").trim() === "6";
+  const p = (period || "").toLowerCase().trim();
+  const isGiuaKy1 =
+    p.includes("giữa") &&
+    (p.includes("i") || p.includes("1")) &&
+    !p.includes("ii") &&
+    !p.includes("2");
+  return isTinHoc && isGrade6 && isGiuaKy1;
+}
+
+function distributeDefaultCounts(length: number, targetTotal: number, allowedIndices?: number[]): number[] {
+  if (length <= 0) return [];
+  const res = new Array(length).fill(0);
+  const indices = allowedIndices && allowedIndices.length > 0
+    ? allowedIndices
+    : Array.from({ length }, (_, i) => i);
+  for (let i = 0; i < targetTotal; i++) {
+    const idx = indices[i % indices.length];
+    res[idx] += 1;
+  }
+  return res;
+}
+
+function cleanSpecDescText(desc?: string): string {
+  if (!desc || typeof desc !== "string") return "";
+  const lines = desc
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => {
+      if (!l) return false;
+      const lower = l.toLowerCase().replace(/^[\-–•\+\*]\s*/, "").trim();
+      if (
+        lower === "không có yêu cầu" ||
+        lower === "không có yêu cầu." ||
+        lower === "không yêu cầu" ||
+        lower === "không yêu cầu." ||
+        lower === "không có" ||
+        lower === "trống" ||
+        lower === "n/a" ||
+        lower === "-" ||
+        lower === "–" ||
+        lower.startsWith("không có yêu cầu")
+      ) {
+        return false;
+      }
+      return true;
+    });
+  return lines.join("\n").trim();
+}
+
+export function findTextbookLessonOutcomes(
+  content?: string,
+  topic?: string,
+  subject?: string,
+  grade?: string
+): { nb: string; th: string; vd: string } {
+  const cLower = (content || "").toLowerCase().trim();
+  const tLower = (topic || "").toLowerCase().trim();
+  const isMath = (subject || "").toLowerCase().includes("toán");
+  const g = String(grade || "6").trim();
+
+  const tb = isMath
+    ? ALL_MATH_TEXTBOOKS?.[g] || ALL_MATH_TEXTBOOKS?.["6"]
+    : ALL_TEXTBOOKS?.[g] || TEXTBOOK_GRADE_6;
+
+  if (tb && Array.isArray(tb.topics)) {
+    const allLessons: Lesson[] = [];
+    tb.topics.forEach((tp) => {
+      if (Array.isArray(tp.lessons)) {
+        allLessons.push(...tp.lessons);
+      }
+    });
+
+    // Try exact lessonNumber match (e.g. "Bài 5", "Bài 8a")
+    const numMatch = cLower.match(/bài\s*([0-9]+[a-b]?)/i);
+    let matchedLesson: Lesson | undefined;
+    if (numMatch) {
+      const targetNum = `bài ${numMatch[1].toLowerCase()}`;
+      matchedLesson = allLessons.find(
+        (l) => l.lessonNumber.toLowerCase().trim() === targetNum
+      );
+    }
+    if (!matchedLesson && cLower) {
+      matchedLesson = allLessons.find((l) => {
+        const lName = l.name.toLowerCase();
+        return cLower.includes(lName) || lName.includes(cLower);
+      });
+    }
+    if (!matchedLesson && tLower) {
+      matchedLesson = allLessons.find((l) =>
+        tLower.includes(l.topicName.toLowerCase()) ||
+        l.topicName.toLowerCase().includes(tLower)
+      );
+    }
+
+    if (matchedLesson) {
+      const nb = (matchedLesson.learningOutcomes.recognition || [])
+        .map((s) => (s.startsWith("–") || s.startsWith("-") ? s : `– ${s}`))
+        .join("\n");
+      const th = (matchedLesson.learningOutcomes.understanding || [])
+        .map((s) => (s.startsWith("–") || s.startsWith("-") ? s : `– ${s}`))
+        .join("\n");
+      const vd = (matchedLesson.learningOutcomes.application || [])
+        .map((s) => (s.startsWith("–") || s.startsWith("-") ? s : `– ${s}`))
+        .join("\n");
+      return { nb, th, vd };
+    }
+  }
+
+  return { nb: "", th: "", vd: "" };
+}
+
+function finalizeSpecRows(
+  rows: StandardSpecRow[],
+  subject?: string,
+  grade?: string,
+  isTin6GK1?: boolean
+): StandardSpecRow[] {
+  return rows.map((row) => {
+    const nbCount = Number(row.nb_count) || 0;
+    const thCount = Number(row.th_count) || 0;
+    const vdCount = Number(row.vd_count) || 0;
+
+    let nbDesc = cleanSpecDescText(row.nb_desc);
+    let thDesc = cleanSpecDescText(row.th_desc);
+    let vdDesc = cleanSpecDescText(row.vd_desc);
+
+    const tbOut = findTextbookLessonOutcomes(row.content, row.topic, subject, grade);
+    const lessonLabel = row.content || row.topic || "bài học";
+
+    if (!nbDesc || (nbCount > 0 && nbDesc.length < 8)) {
+      nbDesc =
+        tbOut.nb ||
+        `– Nhận biết và nêu được các khái niệm, kiến thức cơ bản của ${lessonLabel}.`;
+    }
+    if (!thDesc || (thCount > 0 && thDesc.length < 8)) {
+      thDesc =
+        tbOut.th ||
+        `– Hiểu và giải thích được nội dung trọng tâm, mối liên hệ kiến thức trong ${lessonLabel}.`;
+    }
+    if (vdCount > 0 && (!vdDesc || vdDesc.length < 8)) {
+      vdDesc =
+        tbOut.vd ||
+        `– Vận dụng được kiến thức của ${lessonLabel} để giải quyết tình huống và bài tập thực tiễn.`;
+    } else if (!isTin6GK1 && !vdDesc && tbOut.vd) {
+      vdDesc = tbOut.vd;
+    }
+
+    return {
+      ...row,
+      nb_desc: nbDesc,
+      th_desc: thDesc,
+      vd_desc: vdDesc,
+      nb_count: nbCount,
+      th_count: thCount,
+      vd_count: vdCount
+    };
+  });
+}
+
+export function syncSpecificationWithMatrix(
+  rawSpecification?: any[],
+  matrix?: any[],
+  subject?: string,
+  grade?: string,
+  period?: string
+): StandardSpecRow[] {
+  const isMath = (subject || "").toLowerCase().includes("toán");
+  const isTin6GK1 = isTinHoc6GiuaKy1(subject, grade, period);
+
+  // Extract normalized counts from matrix if available
+  const matrixRows = Array.isArray(matrix) && matrix.length > 0 ? matrix : [];
+  const matrixCounts = matrixRows.map((m) => {
+    const nb =
+      Number(m.total_nb) ||
+      (Number(m.mcq_nb) || 0) + (Number(m.tf_nb) || 0) + (Number(m.sa_nb) || 0) + (Number(m.tl_nb) || 0);
+    const th =
+      Number(m.total_th) ||
+      (Number(m.mcq_th) || 0) + (Number(m.tf_th) || 0) + (Number(m.sa_th) || 0) + (Number(m.tl_th) || 0);
+    const vd =
+      Number(m.total_vd) ||
+      (Number(m.mcq_vd) || 0) + (Number(m.tf_vd) || 0) + (Number(m.sa_vd) || 0) + (Number(m.tl_vd) || 0);
+    return {
+      topic: m.topic || "",
+      content: m.content || "",
+      nb,
+      th,
+      vd
+    };
+  });
+
+  if (isTin6GK1) {
+    if (matrixCounts.length > 0) {
+      const mapped = matrixCounts.map((mc, idx) => {
+        const cLower = mc.content.toLowerCase();
+        const matchedTemplate =
+          TIN_HOC_6_GIUA_HK1_SPECIFICATION.find((t) => {
+            const tLower = t.content.toLowerCase();
+            if (cLower.includes("bài 1") && tLower.includes("bài 1")) return true;
+            if (cLower.includes("bài 2") && tLower.includes("bài 2")) return true;
+            if (cLower.includes("bài 3") && tLower.includes("bài 3")) return true;
+            if (cLower.includes("bài 4") && tLower.includes("bài 4")) return true;
+            if (cLower.includes("bài 5") && tLower.includes("bài 5")) return true;
+            return cLower.includes(tLower) || tLower.includes(cLower);
+          }) ||
+          TIN_HOC_6_GIUA_HK1_SPECIFICATION[idx % TIN_HOC_6_GIUA_HK1_SPECIFICATION.length];
+
+        const fallbackRow = TIN_HOC_6_GIUA_HK1_SPECIFICATION[idx % TIN_HOC_6_GIUA_HK1_SPECIFICATION.length];
+        return {
+          topic: mc.topic || matchedTemplate.topic,
+          content: mc.content || matchedTemplate.content,
+          nb_desc: matchedTemplate.nb_desc,
+          th_desc: matchedTemplate.th_desc,
+          vd_desc: matchedTemplate.vd_desc,
+          nb_count: mc.nb > 0 || mc.th > 0 || mc.vd > 0 ? mc.nb : (fallbackRow.nb_count || 0),
+          th_count: mc.nb > 0 || mc.th > 0 || mc.vd > 0 ? mc.th : (fallbackRow.th_count || 0),
+          vd_count: mc.nb > 0 || mc.th > 0 || mc.vd > 0 ? mc.vd : (fallbackRow.vd_count || 0),
+        };
+      });
+      return finalizeSpecRows(mapped, subject, grade, true);
+    }
+    return finalizeSpecRows(TIN_HOC_6_GIUA_HK1_SPECIFICATION.map((r) => ({ ...r })), subject, grade, true);
+  }
+
+  const baseSpec: StandardSpecRow[] =
+    Array.isArray(rawSpecification) && rawSpecification.length > 0
+      ? rawSpecification.map((r) => ({ ...r }))
+      : [];
+
+  if (baseSpec.length === 0 && matrixCounts.length > 0) {
+    return finalizeSpecRows(
+      matrixCounts.map((mc) => ({
+        topic: mc.topic,
+        content: mc.content,
+        nb_desc: "",
+        th_desc: "",
+        vd_desc: "",
+        nb_count: mc.nb,
+        th_count: mc.th,
+        vd_count: mc.vd
+      })),
+      subject,
+      grade,
+      false
+    );
+  }
+
+  if (matrixCounts.length > 0) {
+    if (baseSpec.length === matrixCounts.length) {
+      return finalizeSpecRows(
+        baseSpec.map((row, idx) => {
+          const mc = matrixCounts[idx];
+          const hasMatrixCounts = mc.nb > 0 || mc.th > 0 || mc.vd > 0;
+          return {
+            ...row,
+            topic: row.topic || mc.topic,
+            content: row.content || mc.content,
+            nb_count: hasMatrixCounts ? mc.nb : (Number(row.nb_count) || 0),
+            th_count: hasMatrixCounts ? mc.th : (Number(row.th_count) || 0),
+            vd_count: hasMatrixCounts ? mc.vd : (Number(row.vd_count) || 0),
+          };
+        }),
+        subject,
+        grade,
+        false
+      );
+    } else {
+      return finalizeSpecRows(
+        matrixCounts.map((mc, idx) => {
+          const cLower = mc.content.toLowerCase();
+          const tLower = mc.topic.toLowerCase();
+          const matched =
+            baseSpec.find((s) => {
+              const sc = (s.content || "").toLowerCase();
+              const st = (s.topic || "").toLowerCase();
+              return (sc && (cLower.includes(sc) || sc.includes(cLower))) || (st && tLower === st);
+            }) || baseSpec[idx % baseSpec.length];
+
+          return {
+            topic: mc.topic || matched?.topic || "",
+            content: mc.content || matched?.content || "",
+            nb_desc: matched?.nb_desc || "",
+            th_desc: matched?.th_desc || "",
+            vd_desc: matched?.vd_desc || "",
+            nb_count: mc.nb,
+            th_count: mc.th,
+            vd_count: mc.vd,
+          };
+        }),
+        subject,
+        grade,
+        false
+      );
+    }
+  }
+
+  // Fallback when no matrix is provided: ensure non-zero totals if all counts are currently 0
+  const sumNb = baseSpec.reduce((s, r) => s + (Number(r.nb_count) || 0), 0);
+  const sumTh = baseSpec.reduce((s, r) => s + (Number(r.th_count) || 0), 0);
+  const sumVd = baseSpec.reduce((s, r) => s + (Number(r.vd_count) || 0), 0);
+
+  if (baseSpec.length > 0 && sumNb === 0 && sumTh === 0 && sumVd === 0) {
+    const defNb = distributeDefaultCounts(baseSpec.length, isMath ? 17 : 16);
+    const defTh = distributeDefaultCounts(baseSpec.length, isMath ? 5 : 12);
+    const defVd = distributeDefaultCounts(baseSpec.length, 3);
+    return finalizeSpecRows(
+      baseSpec.map((r, i) => ({
+        ...r,
+        nb_count: defNb[i],
+        th_count: defTh[i],
+        vd_count: defVd[i]
+      })),
+      subject,
+      grade,
+      false
+    );
+  }
+
+  return finalizeSpecRows(baseSpec, subject, grade, false);
+}
+
 export const TEXTBOOK_GRADE_6: TextbookGrade = {
   grade: "6",
   bookSeries: "Kết nối tri thức với cuộc sống",
@@ -44,14 +460,15 @@ export const TEXTBOOK_GRADE_6: TextbookGrade = {
           periods: 2,
           learningOutcomes: {
             recognition: [
-              "Nhận biết được sự khác nhau giữa thông tin và dữ liệu.",
-              "Nêu được ví dụ minh hoạ về thông tin và dữ liệu."
+              "Trong các tình huống cụ thể có sẵn: Phân biệt được thông tin với vật mang tin.",
+              "Nhận biết được sự khác nhau giữa thông tin và dữ liệu."
             ],
             understanding: [
-              "Giải thích được mối quan hệ giữa thông tin và dữ liệu."
+              "Nêu được ví dụ minh hoạ về mối quan hệ giữa thông tin và dữ liệu.",
+              "Nêu được ví dụ minh hoạ tầm quan trọng của thông tin."
             ],
             application: [
-              "Chỉ ra được tầm quan trọng của thông tin trong thực tiễn."
+              "Giải thích được máy tính và các thiết bị số là công cụ hiệu quả để thu thập, lưu trữ, xử lí và truyền thông tin. Nêu được ví dụ minh hoạ cụ thể."
             ]
           },
           keyConcepts: ["Thông tin", "Dữ liệu", "Vật mang tin"]
@@ -65,16 +482,17 @@ export const TEXTBOOK_GRADE_6: TextbookGrade = {
           periods: 2,
           learningOutcomes: {
             recognition: [
-              "Nhận biết được các bước cơ bản trong xử lí thông tin."
+              "Nêu được các bước cơ bản trong xử lí thông tin."
             ],
             understanding: [
-              "Giải thích được vai trò của thiết bị trong việc xử lí thông tin."
+              "Nêu được ví dụ minh hoạ về mối quan hệ giữa thông tin và dữ liệu.",
+              "Nêu được ví dụ minh hoạ tầm quan trọng của thông tin."
             ],
             application: [
-              "Mô tả được quy trình xử lí thông tin của một thiết bị cụ thể."
+              "Giải thích được máy tính và các thiết bị số là công cụ hiệu quả để thu thập, lưu trữ, xử lí và truyền thông tin. Nêu được ví dụ minh hoạ cụ thể."
             ]
           },
-          keyConcepts: ["Quy trình xử lí thông tin", "Bộ nhớ", "Bộ xử lí"]
+          keyConcepts: ["Quy trình xử lí thông tin", "Thu thập", "Lưu trữ", "Xử lí", "Truyền thông tin"]
         },
         {
           id: "g6_b3",
@@ -85,16 +503,17 @@ export const TEXTBOOK_GRADE_6: TextbookGrade = {
           periods: 2,
           learningOutcomes: {
             recognition: [
-              "Biết được thông tin được biểu diễn trong máy tính dưới dạng dãy bit."
+              "Biết được bit là đơn vị nhỏ nhất trong lưu trữ thông tin.",
+              "Nêu được tên và độ lớn (xấp xỉ theo hệ thập phân) của các đơn vị cơ bản đo dung lượng thông tin: Byte, KB, MB, GB, quy đổi được một cách gần đúng giữa các đơn vị đo lường này. Ví dụ: 1KB bằng xấp xỉ 1 ngàn byte, 1 MB xấp xỉ 1 triệu byte, 1 GB xấp xỉ 1 tỉ byte."
             ],
             understanding: [
-              "Giải thích được các đơn vị đo dung lượng thông tin."
+              "Giải thích được có thể biểu diễn thông tin chỉ với hai kí hiệu 0 và 1."
             ],
             application: [
-              "Thực hiện quy đổi được các đơn vị đo dung lượng thông tin."
+              "Xác định được khả năng lưu trữ của các thiết bị nhớ thông dụng như đĩa quang, đĩa từ, đĩa cứng, USB, CD, thẻ nhớ,…"
             ]
           },
-          keyConcepts: ["Bit", "Byte", "KB", "MB", "GB", "TB"]
+          keyConcepts: ["Bit", "Byte", "KB", "MB", "GB", "TB", "Biểu diễn thông tin", "Thiết bị nhớ"]
         }
       ]
     },
@@ -111,16 +530,15 @@ export const TEXTBOOK_GRADE_6: TextbookGrade = {
           periods: 2,
           learningOutcomes: {
             recognition: [
-              "Nêu được khái niệm mạng máy tính."
+              "Nêu được khái niệm và lợi ích của mạng máy tính.",
+              "Nêu được các thành phần chủ yếu của một mạng máy tính (máy tính và các thiết bị kết nối) và tên của một vài thiết bị mạng cơ bản như máy tính, cáp nối, Switch, Access Point,..."
             ],
             understanding: [
-              "Nêu được các thành phần cơ bản của mạng máy tính."
+              "Nêu được ví dụ cụ thể về trường hợp mạng không dây tiện dụng hơn mạng có dây."
             ],
-            application: [
-              "Giải thích được lợi ích của mạng máy tính."
-            ]
+            application: []
           },
-          keyConcepts: ["Mạng máy tính", "Thiết bị kết nối"]
+          keyConcepts: ["Mạng máy tính", "Thiết bị kết nối", "Cáp nối", "Switch", "Access Point", "Mạng không dây"]
         },
         {
           id: "g6_b5",
@@ -131,16 +549,14 @@ export const TEXTBOOK_GRADE_6: TextbookGrade = {
           periods: 2,
           learningOutcomes: {
             recognition: [
-              "Nêu được khái niệm Internet."
+              "Nêu được các đặc điểm và ích lợi chính của Internet."
             ],
             understanding: [
-              "Nêu được các đặc điểm chính của Internet."
+              "Nêu được ví dụ cụ thể về trường hợp mạng không dây tiện dụng hơn mạng có dây."
             ],
-            application: [
-              "Liệt kê và giải thích được một số dịch vụ phổ biến trên Internet."
-            ]
+            application: []
           },
-          keyConcepts: ["Internet", "Dịch vụ Internet"]
+          keyConcepts: ["Internet", "Đặc điểm của Internet", "Ích lợi của Internet"]
         }
       ]
     },
@@ -1817,4 +2233,175 @@ Nguồn tài liệu: Dữ liệu chương trình môn ${subject} ${grade} theo c
   prompt += `\n=== HẾT DỮ LIỆU SGK ${subject.toUpperCase()} ${grade} CHÍNH THỨC ===\n`;
   prompt += `LƯU Ý: AI BẮT BUỘC trích xuất kiến thức và câu hỏi bám sát tuyệt đối dữ liệu SGK chính thức trên. Tuyệt đối không lấy kiến thức ngoài luồng.\n`;
   return prompt;
+}
+
+export interface QuestionLessonAllocation {
+  id: number;
+  topic: string;
+  content: string;
+  level: "Nhận biết" | "Thông hiểu" | "Vận dụng";
+  desc: string;
+}
+
+/**
+ * Extracts deterministic question-to-lesson allocations from Matrix and Specification
+ * so ALL exam variants (Mã 001, Mã 002, Mã 101, Mã 102...) strictly match the exact same lessons
+ * for MCQ, True/False, Short Answer, and Applied (Tự luận / Thực hành) questions.
+ */
+export function extractMatrixQuestionPlan(
+  matrix?: any[],
+  rawSpecification?: any[],
+  subject?: string,
+  grade?: string,
+  period?: string
+) {
+  const isMath = (subject || "").toLowerCase().includes("toán");
+  const syncedSpec = syncSpecificationWithMatrix(rawSpecification, matrix, subject, grade, period);
+  const rows = Array.isArray(matrix) && matrix.length > 0 ? matrix : syncedSpec;
+
+  const findSpecForLesson = (content: string, topic: string, idx: number) => {
+    const cLower = (content || "").toLowerCase();
+    return (
+      syncedSpec.find((s) => {
+        const sc = (s.content || "").toLowerCase();
+        return sc && (cLower.includes(sc) || sc.includes(cLower));
+      }) ||
+      syncedSpec[idx] ||
+      syncedSpec[0]
+    );
+  };
+
+  // 1. MCQ Plan (Câu 1..12)
+  const mcqPlan: QuestionLessonAllocation[] = [];
+  let qCounter = 1;
+  rows.forEach((row: any, rIdx: number) => {
+    const lessonName = row.content || row.topic || `Bài ${rIdx + 1}`;
+    const topicName = row.topic || "";
+    const specRow = findSpecForLesson(lessonName, topicName, rIdx);
+    const nbCount = Number(row.mcq_nb) || 0;
+    const thCount = Number(row.mcq_th) || 0;
+    const vdCount = Number(row.mcq_vd) || 0;
+
+    for (let k = 0; k < nbCount && qCounter <= 12; k++) {
+      mcqPlan.push({
+        id: qCounter++,
+        topic: topicName,
+        content: lessonName,
+        level: "Nhận biết",
+        desc: specRow?.nb_desc || ""
+      });
+    }
+    for (let k = 0; k < thCount && qCounter <= 12; k++) {
+      mcqPlan.push({
+        id: qCounter++,
+        topic: topicName,
+        content: lessonName,
+        level: "Thông hiểu",
+        desc: specRow?.th_desc || ""
+      });
+    }
+    for (let k = 0; k < vdCount && qCounter <= 12; k++) {
+      mcqPlan.push({
+        id: qCounter++,
+        topic: topicName,
+        content: lessonName,
+        level: "Vận dụng",
+        desc: specRow?.vd_desc || ""
+      });
+    }
+  });
+
+  // 2. Short Answer Plan for Math (Câu 15..18)
+  const saPlan: QuestionLessonAllocation[] = [];
+  if (isMath) {
+    let saId = 15;
+    rows.forEach((row: any, rIdx: number) => {
+      const lessonName = row.content || row.topic || `Bài ${rIdx + 1}`;
+      const topicName = row.topic || "";
+      const specRow = findSpecForLesson(lessonName, topicName, rIdx);
+      const saNb = Number(row.sa_nb) || 0;
+      const saTh = Number(row.sa_th) || 0;
+      const saVd = Number(row.sa_vd) || 0;
+      for (let k = 0; k < saNb && saId <= 18; k++) {
+        saPlan.push({ id: saId++, topic: topicName, content: lessonName, level: "Nhận biết", desc: specRow?.nb_desc || "" });
+      }
+      for (let k = 0; k < saTh && saId <= 18; k++) {
+        saPlan.push({ id: saId++, topic: topicName, content: lessonName, level: "Thông hiểu", desc: specRow?.th_desc || "" });
+      }
+      for (let k = 0; k < saVd && saId <= 18; k++) {
+        saPlan.push({ id: saId++, topic: topicName, content: lessonName, level: "Vận dụng", desc: specRow?.vd_desc || "" });
+      }
+    });
+  }
+
+  // 3. Applied (Tự luận / Thực hành) Plan (Câu 17..19 for Tin học, Câu 19..21 for Toán)
+  const appliedPlan: QuestionLessonAllocation[] = [];
+  const startAppliedId = isMath ? 19 : 17;
+  let appCounter = startAppliedId;
+
+  rows.forEach((row: any, rIdx: number) => {
+    const lessonName = row.content || row.topic || `Bài ${rIdx + 1}`;
+    const topicName = row.topic || "";
+    const specRow = findSpecForLesson(lessonName, topicName, rIdx);
+
+    const tlNb = Number(row.tl_nb) || 0;
+    const tlTh = Number(row.tl_th) || 0;
+    const tlVd =
+      row.tl_vd !== undefined
+        ? Number(row.tl_vd) || 0
+        : !isMath
+        ? Number(row.vd_count ?? row.total_vd) || 0
+        : 0;
+
+    for (let k = 0; k < tlNb && appliedPlan.length < 3; k++) {
+      appliedPlan.push({
+        id: appCounter++,
+        topic: topicName,
+        content: lessonName,
+        level: "Nhận biết",
+        desc: specRow?.nb_desc || ""
+      });
+    }
+    for (let k = 0; k < tlTh && appliedPlan.length < 3; k++) {
+      appliedPlan.push({
+        id: appCounter++,
+        topic: topicName,
+        content: lessonName,
+        level: "Thông hiểu",
+        desc: specRow?.th_desc || ""
+      });
+    }
+    for (let k = 0; k < tlVd && appliedPlan.length < 3; k++) {
+      appliedPlan.push({
+        id: appCounter++,
+        topic: topicName,
+        content: lessonName,
+        level: "Vận dụng",
+        desc: specRow?.vd_desc || ""
+      });
+    }
+  });
+
+  // Fallback if matrix rows didn't have explicit tl_vd / tl_th populated yet
+  if (appliedPlan.length < 3 && syncedSpec.length > 0) {
+    const vdRows = syncedSpec.filter((s) => (Number(s.vd_count) || 0) > 0);
+    const pool = vdRows.length > 0 ? vdRows : syncedSpec;
+    while (appliedPlan.length < 3) {
+      const pick = pool[appliedPlan.length % pool.length];
+      appliedPlan.push({
+        id: startAppliedId + appliedPlan.length,
+        topic: pick.topic || "",
+        content: pick.content || "",
+        level: "Vận dụng",
+        desc: pick.vd_desc || ""
+      });
+    }
+  }
+
+  return {
+    mcqPlan,
+    saPlan,
+    appliedPlan,
+    syncedSpec
+  };
 }

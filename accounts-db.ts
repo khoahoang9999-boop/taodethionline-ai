@@ -675,22 +675,28 @@ export async function authenticateUser(
 ): Promise<any> {
   await ensureMigrated();
 
-  let name = "";
-  let password = "";
+  let rawName = "";
+  let rawPassword = "";
   let deviceId = "";
 
   if (deviceIdArg !== undefined) {
-    name = (nameOrCode || "").trim();
-    password = (codeOrDeviceId || "").trim();
+    rawName = (nameOrCode || "").trim();
+    rawPassword = (codeOrDeviceId || "").trim();
     deviceId = (deviceIdArg || "").trim();
   } else {
     // 2 arguments passed: authenticateUser(code, deviceId)
-    name = (nameOrCode || "").trim();
-    password = (nameOrCode || "").trim();
+    rawName = (nameOrCode || "").trim();
+    rawPassword = (nameOrCode || "").trim();
     deviceId = (codeOrDeviceId || "").trim();
   }
 
-  if (!name) {
+  const name = rawName.replace(/^@+/, "").trim();
+  const password = rawPassword.trim();
+
+  // If name is empty but password (code) is provided (e.g. background session verify), allow lookup by password/code
+  const lookupName = name || password;
+
+  if (!lookupName) {
     return {
       success: false,
       code: "EMPTY_NAME",
@@ -707,24 +713,101 @@ export async function authenticateUser(
   }
 
   const allAccounts = await getAllAccounts();
-  const normInput = normalizeVietnameseName(name);
+  const normInput = normalizeVietnameseName(lookupName);
+  const digitsInput = lookupName.replace(/[^0-9]/g, "");
 
-  // 1. Locate account by matching username, customerName, or account id
-  let targetAcc = allAccounts.find(acc => {
-    const userMatch = acc.username && acc.username.toLowerCase().trim() === name.toLowerCase().trim();
+  const isPasswordMatchForAcc = (acc: Account, passInput: string): boolean => {
+    const cleanPass = passInput.trim();
+    const storedPass = (acc.password || acc.id || "").trim();
+    const accId = (acc.id || "").trim();
+    const accUser = (acc.username || "").replace(/^@+/, "").trim();
+    const isAdminAcc =
+      accId === "123456" ||
+      accId.toUpperCase() === "ADMIN123" ||
+      accUser.toLowerCase() === "admin" ||
+      (acc.customerName || "").toLowerCase().includes("admin") ||
+      (acc.notes || "").toLowerCase().includes("admin");
+    const isAdminPassInput =
+      cleanPass === "123456" ||
+      cleanPass.toUpperCase() === "ADMIN123" ||
+      cleanPass.toLowerCase() === "admin" ||
+      cleanPass.replace(/[^0-9]/g, "") === "0989982818";
+
+    return (
+      storedPass === cleanPass ||
+      storedPass.toUpperCase() === cleanPass.toUpperCase() ||
+      accId.toUpperCase() === cleanPass.toUpperCase() ||
+      (isAdminAcc && isAdminPassInput)
+    );
+  };
+
+  // 1. Find ALL candidate accounts matching username, customerName, phone, or account id
+  const candidateAccounts = allAccounts.filter(acc => {
+    const cleanAccUser = (acc.username || "").replace(/^@+/, "").toLowerCase().trim();
+    const userMatch = cleanAccUser && cleanAccUser === lookupName.toLowerCase();
     const normUser = acc.username ? normalizeVietnameseName(acc.username) : "";
-    const normStored = normalizeVietnameseName(acc.customerName);
-    const directNameMatch = acc.customerName.toLowerCase().trim() === name.toLowerCase().trim();
-    const idMatch = acc.id.toLowerCase().trim() === name.toLowerCase().trim();
-    return userMatch || (normUser && normInput === normUser) || directNameMatch || (normInput && normStored && normInput === normStored) || idMatch;
+    const normStored = normalizeVietnameseName(acc.customerName || "");
+    const directNameMatch = (acc.customerName || "").toLowerCase().trim() === lookupName.toLowerCase();
+    const idMatch = (acc.id || "").toLowerCase().trim() === lookupName.toLowerCase();
+    const accDigits = (acc.phone || "").replace(/[^0-9]/g, "");
+    const phoneMatch = digitsInput.length >= 8 && accDigits === digitsInput;
+
+    return (
+      userMatch ||
+      (normUser && normInput === normUser) ||
+      directNameMatch ||
+      (normInput && normStored && normInput === normStored) ||
+      idMatch ||
+      phoneMatch
+    );
   });
 
-  // Admin bypass
-  const isAdminUser = normInput === "admin" || normInput.includes("admin");
-  const isAdminPass = password === "123456" || password === "ADMIN123" || password === "0989982818";
+  // Prefer the candidate whose password also matches
+  let targetAcc = candidateAccounts.find(acc => isPasswordMatchForAcc(acc, password)) || candidateAccounts[0];
+
+  // Admin master bypass (always works for admin / 123456, admin / admin, admin / ADMIN123, 0989.982.818)
+  const isAdminUser =
+    normInput === "admin" ||
+    normInput === "admin123" ||
+    normInput.includes("admin") ||
+    digitsInput === "0989982818" ||
+    lookupName === "123456" ||
+    lookupName.toUpperCase() === "ADMIN123";
+  const isAdminPass =
+    password === "123456" ||
+    password.toUpperCase() === "ADMIN123" ||
+    password.toLowerCase() === "admin" ||
+    password.replace(/[^0-9]/g, "") === "0989982818";
 
   if (!targetAcc && isAdminUser && isAdminPass) {
-    targetAcc = allAccounts.find(acc => acc.customerName.toLowerCase().includes("admin") || acc.id === "123456" || acc.id === "ADMIN123");
+    targetAcc = allAccounts.find(
+      acc =>
+        (acc.username || "").toLowerCase() === "admin" ||
+        (acc.customerName || "").toLowerCase().includes("admin") ||
+        acc.id === "123456" ||
+        acc.id === "ADMIN123"
+    );
+    // If Admin account was missing or deleted in DB, auto-provision Master Admin account immediately
+    if (!targetAcc) {
+      const fallbackAdmin: Account = {
+        id: "123456",
+        username: "admin",
+        customerName: "admin",
+        password: "123456",
+        phone: "0989.982.818",
+        createdDate: getTodayString(),
+        expiryDate: "2099-12-31",
+        maxDevices: 999,
+        devices: [],
+        status: "active",
+        notes: "Tài khoản Quản trị viên (Admin)"
+      };
+      try {
+        const { id, ...rest } = fallbackAdmin;
+        await setDoc(doc(db, 'accounts', '123456'), rest);
+      } catch {}
+      targetAcc = fallbackAdmin;
+    }
   }
 
   if (!targetAcc) {
@@ -736,13 +819,7 @@ export async function authenticateUser(
   }
 
   // 2. Verify Password against this specific account
-  const storedPass = (targetAcc.password || targetAcc.id || "").trim();
-  const passDirectMatch = storedPass === password.trim();
-  const passCaseInsensitive = storedPass.toUpperCase() === password.trim().toUpperCase();
-  const passIdMatch = targetAcc.id.toUpperCase() === password.trim().toUpperCase();
-  const passAdminBypass = isAdminUser && isAdminPass;
-
-  if (!passDirectMatch && !passCaseInsensitive && !passIdMatch && !passAdminBypass) {
+  if (!isPasswordMatchForAcc(targetAcc, password) && !(isAdminUser && isAdminPass)) {
     return {
       success: false,
       code: "PASSWORD_MISMATCH",
@@ -754,7 +831,7 @@ export async function authenticateUser(
   const accId = targetAcc.id;
   const docRef = doc(db, 'accounts', accId);
 
-  if (accData.status === "locked") {
+  if (accData.status === "locked" && !(isAdminUser && isAdminPass)) {
     return {
       success: false,
       code: "LOCKED",
@@ -762,28 +839,29 @@ export async function authenticateUser(
     };
   }
 
-  const isLicensed = isAccountLicensed(accData.expiryDate);
+  const isLicensed = isAccountLicensed(accData.expiryDate) || (isAdminUser && isAdminPass);
   const trialCount = Number(accData.trialCount) || 0;
   const isTrialLocked = !isLicensed && trialCount >= 5;
 
   const devId = deviceId || "unknown_device";
-  const devices = accData.devices || [];
+  const devices = Array.isArray(accData.devices) ? accData.devices : [];
   const isRegisteredDevice = devices.includes(devId);
+  const maxDevices = Number(accData.maxDevices) || (isAdminUser ? 999 : 2);
 
   const accountInfo = {
     id: accId,
     username: accData.username || accId,
-    customerName: accData.customerName,
+    customerName: accData.customerName || accData.username || accId,
     password: accData.password || accId,
-    phone: accData.phone,
+    phone: accData.phone || "",
     notes: accData.notes || "",
     avatar: accData.avatar || "",
-    expiryDate: accData.expiryDate || "",
+    expiryDate: accData.expiryDate || (isAdminUser ? "2099-12-31" : ""),
     isLicensed,
     trialCount,
     isTrialLocked,
-    maxDevices: accData.maxDevices,
-    deviceCount: isRegisteredDevice ? devices.length : Math.min(devices.length + 1, accData.maxDevices),
+    maxDevices,
+    deviceCount: isRegisteredDevice ? devices.length : Math.min(devices.length + 1, maxDevices),
     apiKeys: accData.apiKeys || []
   };
 
@@ -794,9 +872,11 @@ export async function authenticateUser(
     };
   }
 
-  if (devices.length < accData.maxDevices) {
+  if (devices.length < maxDevices || (isAdminUser && isAdminPass)) {
     const newDevices = [...devices, devId];
-    await updateDoc(docRef, { devices: newDevices });
+    try {
+      await updateDoc(docRef, { devices: newDevices });
+    } catch {}
     accountInfo.deviceCount = newDevices.length;
     return {
       success: true,
@@ -807,6 +887,7 @@ export async function authenticateUser(
   return {
     success: false,
     code: "MAX_DEVICES",
-    error: `Tài khoản "${accData.customerName}" (${accId}) đã kích hoạt trên đủ ${accData.maxDevices} thiết bị cho phép. Vui lòng liên hệ Quản trị viên để giải phóng thiết bị.`
+    error: `Tài khoản "${accData.customerName}" (${accId}) đã kích hoạt trên đủ ${maxDevices} thiết bị cho phép. Vui lòng liên hệ Quản trị viên để giải phóng thiết bị.`
   };
 }
+

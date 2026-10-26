@@ -6,7 +6,14 @@ import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import mammoth from "mammoth";
 import * as XLSX from "xlsx";
 import dotenv from "dotenv";
-import { getOfficialTextbookReferencePrompt, getFilteredTextbookReferencePrompt } from "./src/data/textbooks";
+import {
+  getOfficialTextbookReferencePrompt,
+  getFilteredTextbookReferencePrompt,
+  TIN_HOC_6_GIUA_HK1_SPECIFICATION,
+  isTinHoc6GiuaKy1,
+  syncSpecificationWithMatrix,
+  extractMatrixQuestionPlan
+} from "./src/data/textbooks";
 import { ALL_MATH_TEXTBOOKS } from "./src/data/math";
 import {
   getAllAccounts,
@@ -31,6 +38,18 @@ import {
   deleteCustomPpct,
   SavedPpctRecord
 } from "./ppct-db";
+import {
+  getAllSavedExams,
+  getSavedExamById,
+  saveExamRecord,
+  deleteSavedExam,
+  getAllSavedStudyGuides,
+  getSavedStudyGuideById,
+  saveStudyGuideRecord,
+  deleteSavedStudyGuide,
+  SavedExamRecord,
+  SavedStudyGuideRecord
+} from "./saved-exams-db";
 
 dotenv.config();
 
@@ -53,6 +72,14 @@ function getAI(): GoogleGenAI {
   return aiClient;
 }
 
+function cleanApiKeyString(raw: any): string {
+  if (!raw || typeof raw !== "string") return "";
+  return raw
+    .replace(/[\s"'`“”‘’\u200B-\u200D\uFEFF]/g, "")
+    .replace(/^Bearer\s+/i, "")
+    .trim();
+}
+
 /**
  * Helper to build API key pool.
  * Rotates through user keys, account keys, and environment keys.
@@ -66,9 +93,10 @@ async function getApiKeyPool(
   // 1. Add keys passed directly from user client
   if (Array.isArray(userApiKeys)) {
     for (const item of userApiKeys) {
-      if (item && typeof item.key === "string" && item.key.trim()) {
+      const cleaned = cleanApiKeyString(item?.key);
+      if (cleaned) {
         pool.push({
-          key: item.key.trim(),
+          key: cleaned,
           label: item.label?.trim() || "User Key"
         });
       }
@@ -93,10 +121,11 @@ async function getApiKeyPool(
       }
       if (Array.isArray(acc.apiKeys)) {
         for (const item of acc.apiKeys) {
-          if (item && typeof item.key === "string" && item.key.trim()) {
-            if (!pool.some((p) => p.key === item.key.trim())) {
+          const cleaned = cleanApiKeyString(item?.key);
+          if (cleaned) {
+            if (!pool.some((p) => p.key === cleaned)) {
               pool.push({
-                key: item.key.trim(),
+                key: cleaned,
                 label: item.label?.trim() || `Tài khoản ${acc.id}`
               });
             }
@@ -124,7 +153,7 @@ async function getApiKeyPool(
   for (let i = 0; i < envKeysRaw.length; i++) {
     const raw = envKeysRaw[i];
     if (raw && typeof raw === "string" && raw.trim()) {
-      const parts = raw.split(",").map(k => k.trim()).filter(Boolean);
+      const parts = raw.split(",").map(k => cleanApiKeyString(k)).filter(Boolean);
       for (const k of parts) {
         if (!pool.some((p) => p.key === k)) {
           pool.push({
@@ -204,28 +233,13 @@ function normalizeMatrixPercentagesBackend(matrix: any[], isFinalExam: boolean =
   }));
 }
 
-// Helper: Map model aliases to officially supported Gemini API models
-function resolveGeminiModelName(name: string): string {
-  const clean = (name || "").trim().toLowerCase();
-  if (clean === "gemini-3.1-flash" || clean === "gemini-3.1") {
-    return "gemini-3.1-flash-lite";
-  }
-  if (clean === "gemini-3.5-flash" || clean === "gemini-3.5") {
-    return "gemini-3.1-flash-lite";
-  }
-  if (clean === "gemini-2.5-flash" || clean === "gemini-2.5" || clean === "gemini-3.6-flash") {
-    return "gemini-3.7-flash";
-  }
-  if (clean === "gemini-flash" || clean === "flash") {
-    return "gemini-flash-latest";
-  }
-  return name;
+// Helper: Cấu hình danh sách Model AI khả dụng (Ưu tiên gemini-3.5-flash-lite, tự động chuyển sang gemini-3.1-flash-lite nếu cần)
+function resolveGeminiModelName(name?: string): string {
+  if (name && (name.includes("3.5") || name.includes("3.1"))) return name;
+  return "gemini-3.5-flash-lite";
 }
 
-// In-memory model state tracking for smart failover & degradation
-const modelCooldownMap = new Map<string, number>(); // modelName -> timestamp when cooldown expires
-let lastWorkingModel: string | null = null;
-
+let lastWorkingModel: string = "gemini-3.5-flash-lite";
 let globalKeyOffset = 0;
 
 async function executeGeminiWithFailover({
@@ -256,68 +270,36 @@ async function executeGeminiWithFailover({
   const rotatedPool: { key: string; label: string; origIdx: number }[] = [];
   for (let i = 0; i < pool.length; i++) {
     const idx = (startKeyIdx + i) % pool.length;
-    rotatedPool.push({ key: (pool[idx].key || "").trim(), label: pool[idx].label || `Key #${idx + 1}`, origIdx: idx });
+    rotatedPool.push({ key: cleanApiKeyString(pool[idx].key), label: pool[idx].label || `Key #${idx + 1}`, origIdx: idx });
   }
 
-  console.log(`[Failover Runner] Bắt đầu gọi Gemini với Pool ${pool.length} Key (Khởi đầu với Key #${startKeyIdx + 1} ${rotatedPool[0].label})...`);
+  // Danh sách các Model AI hỗ trợ (ưu tiên gemini-3.5-flash-lite, tự động dự phòng gemini-3.1-flash-lite)
+  const candidateModels = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"];
+  console.log(`[Failover Runner] Bắt đầu gọi Gemini (${candidateModels.join(", ")}) qua Pool ${pool.length} Key (Khởi đầu với Key #${startKeyIdx + 1} ${rotatedPool[0].label})...`);
 
   let lastError: any = null;
+  const invalidKeySet = new Set<string>();
 
-  // DANH SÁCH MODEL CHUẨN GEMINI 3 ĐƯỢC GOOGLE HỖ TRỢ CHÍNH THỨC (Ưu tiên tốc độ siêu tốc và chất lượng cao):
-  // 1. gemini-3.1-flash-lite (Bậc 1: Tốc độ phản hồi cực nhanh ~1-3s, độ trễ tối thiểu)
-  // 2. gemini-3.7-flash (Bậc 2: Model đa năng, thông minh nhất với ThinkingLevel.LOW)
-  // 3. gemini-flash-latest (Bậc 3: Tự động trỏ model flash mới nhất)
-  // 4. gemini-3.1-pro-preview (Bậc 4: Dự phòng chuyên sâu)
-  const defaultModels = [
-    "gemini-3.1-flash-lite",
-    "gemini-3.7-flash",
-    "gemini-flash-latest",
-    "gemini-3.1-pro-preview"
-  ];
+  for (let kIdx = 0; kIdx < rotatedPool.length; kIdx++) {
+    const keyItem = rotatedPool[kIdx];
+    const keyIdx = keyItem.origIdx;
+    const keyLabel = keyItem.label;
 
-  // Build model execution queue: start with default sequence
-  const now = Date.now();
-  let candidateModels = defaultModels.filter((m) => {
-    const cooldownUntil = modelCooldownMap.get(m) || 0;
-    return now >= cooldownUntil;
-  });
+    if (!keyItem.key || invalidKeySet.has(keyItem.key)) {
+      continue;
+    }
 
-  // If all models are in cooldown, reset cooldowns and try all
-  if (candidateModels.length === 0) {
-    modelCooldownMap.clear();
-    candidateModels = [...defaultModels];
-  }
+    let client: GoogleGenAI;
+    try {
+      client = new GoogleGenAI({ apiKey: keyItem.key });
+    } catch (err: any) {
+      console.log(`[Failover] Key #${keyIdx + 1} (${keyLabel}) lỗi khởi tạo:`, err.message);
+      lastError = err;
+      continue;
+    }
 
-  console.log(`[Failover Runner] Danh sách Model ưu tiên: ${candidateModels.join(" -> ")}`);
-
-  // QUY TRÌNH NGHIÊM NGẶT:
-  // Với mỗi Model: Thử LẦN LƯỢT TẤT CẢ CÁC KEY trong Pool.
-  // Chỉ khi TẤT CẢ các Key trong Pool đều thất bại trên Model đó, mới chuyển sang Model kế tiếp!
-  for (let mIdx = 0; mIdx < candidateModels.length; mIdx++) {
-    const rawModelName = candidateModels[mIdx];
-    const modelName = resolveGeminiModelName(rawModelName);
-
-    console.log(`\n[Failover Stage] Bắt đầu kiểm tra Model [${modelName}] với toàn bộ ${rotatedPool.length} API Key...`);
-
-    for (let kIdx = 0; kIdx < rotatedPool.length; kIdx++) {
-      const keyItem = rotatedPool[kIdx];
-      const keyIdx = keyItem.origIdx;
-      const keyLabel = keyItem.label;
-
-      if (!keyItem.key) {
-        continue;
-      }
-
-      let client: GoogleGenAI;
-      try {
-        client = new GoogleGenAI({ apiKey: keyItem.key });
-      } catch (err: any) {
-        console.log(`[Failover] Key #${keyIdx + 1} (${keyLabel}) lỗi khởi tạo:`, err.message);
-        lastError = err;
-        continue;
-      }
-
-      const maxAttempts = 2;
+    for (const modelName of candidateModels) {
+      const maxAttempts = 4;
       let attempt = 0;
 
       while (attempt < maxAttempts) {
@@ -328,13 +310,6 @@ async function executeGeminiWithFailover({
           const mergedConfig: any = validateJson
             ? { responseMimeType: "application/json", ...config }
             : { ...config };
-
-          // Minimize latency: Enable ThinkingLevel.LOW for models with thinking capability so they respond instantly
-          if (!mergedConfig.thinkingConfig && (modelName.includes("3.7") || modelName.includes("3.1") || modelName.includes("2.5"))) {
-            try {
-              mergedConfig.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
-            } catch {}
-          }
 
           const genResult = await client.models.generateContent({
             model: modelName,
@@ -350,10 +325,10 @@ async function executeGeminiWithFailover({
                 console.warn(`[Failover JSON Error] Key #${keyIdx + 1} (${keyLabel}) với Model ${modelName} parse JSON lần ${attempt} chưa thành công:`, (parseErr as any)?.message);
                 lastError = parseErr;
                 if (attempt < maxAttempts) {
-                  await new Promise((r) => setTimeout(r, 600));
-                  continue; // Try attempt 2 on the same key!
+                  await new Promise((r) => setTimeout(r, 600 * attempt));
+                  continue;
                 }
-                break; // Exhausted attempts on this key, switch to next key
+                break;
               }
             }
             console.log(`✅ [Failover Success] Thành công với Model [${modelName}] sử dụng Key #${keyIdx + 1} (${keyLabel})!`);
@@ -365,24 +340,17 @@ async function executeGeminiWithFailover({
           console.warn(`⚠️ [Failover Warning] Model ${modelName} với Key #${keyIdx + 1} (${keyLabel}) gặp lỗi: ${errMsg}`);
           lastError = err;
 
-          const isKeyInvalid =
+          // Only mark a key as truly invalid if Google explicitly says the API key itself is invalid
+          const isExplicitKeyInvalid =
             errMsg.includes("API_KEY_INVALID") ||
-            errMsg.includes("Unauthorized") ||
-            errMsg.includes("UNAUTHENTICATED") ||
-            errMsg.includes("401") ||
-            errMsg.includes("PERMISSION_DENIED") ||
-            errMsg.includes("403");
+            errMsg.includes("API key not valid") ||
+            errMsg.includes("API_KEY_NOT_FOUND") ||
+            errMsg.includes("pass a valid API key");
 
-          if (isKeyInvalid) {
-            console.warn(`[Failover Key Invalid] Key #${keyIdx + 1} (${keyLabel}) không hợp lệ hoặc bị từ chối quyền (401/403). Chuyển ngay sang Key tiếp theo...`);
-            break; // Skip directly to next key in rotatedPool
-          }
-
-          const isNotFound = errMsg.includes("404") || errMsg.includes("not found") || errMsg.includes("no longer available");
-          if (isNotFound) {
-            modelCooldownMap.set(modelName, Date.now() + 86400000);
-            console.warn(`[Failover Deprecated Model] ${modelName} không tồn tại trên hệ thống. Bỏ qua Model này.`);
-            break; // Break key loop for this non-existent model
+          if (isExplicitKeyInvalid) {
+            invalidKeySet.add(keyItem.key);
+            console.warn(`[Failover Key Invalid] Key #${keyIdx + 1} (${keyLabel}) bị báo API_KEY_INVALID. Chuyển sang Key tiếp theo...`);
+            break;
           }
 
           const isRateLimitOrBusy = 
@@ -394,24 +362,24 @@ async function executeGeminiWithFailover({
 
           if (isRateLimitOrBusy) {
             if (attempt < maxAttempts) {
-              console.warn(`[Failover 503/429] Key #${keyIdx + 1} bận tạm thời. Đợi 1s rồi thử lại lần ${attempt + 1}...`);
-              await new Promise((r) => setTimeout(r, 1000));
+              const backoffMs = attempt * 1500 + Math.floor(Math.random() * 500);
+              console.warn(`[Failover 503/429] Key #${keyIdx + 1} bận tạm thời với Model ${modelName}. Đợi ${backoffMs}ms rồi thử lại lần ${attempt + 1}...`);
+              await new Promise((r) => setTimeout(r, backoffMs));
               continue;
             }
-            console.warn(`[Failover RateLimit/Busy] Key #${keyIdx + 1} đã thử ${maxAttempts} lần. Chuyển sang Key tiếp theo trong cùng Model ${modelName}...`);
-            break; // Try next key in rotatedPool for this same model
+            console.warn(`[Failover RateLimit/Busy] Key #${keyIdx + 1} với Model ${modelName} đã thử ${maxAttempts} lần. Thử model tiếp theo hoặc Key tiếp theo...`);
+            break;
           }
 
           if (attempt < maxAttempts) {
-            await new Promise((r) => setTimeout(r, 800));
+            await new Promise((r) => setTimeout(r, 800 * attempt));
           }
         }
       }
-    }
 
-    console.warn(`❌ [Failover Model Exhausted] Đã thử TOÀN BỘ ${rotatedPool.length} API Key trên Model [${modelName}] nhưng đều lỗi.`);
-    if (mIdx < candidateModels.length - 1) {
-      console.log(`➡️ [Model Downgrade] Tự động chuyển xuống Model cấp tiếp theo: [${candidateModels[mIdx + 1]}] và tiếp tục thử lại toàn bộ ${rotatedPool.length} Key...`);
+      if (invalidKeySet.has(keyItem.key)) {
+        break;
+      }
     }
   }
 
@@ -461,14 +429,11 @@ function formatVietnameseError(err: any): string {
   if (
     msg.includes("API_KEY_INVALID") ||
     msg.includes("API key not valid") ||
-    msg.includes("Unauthorized") ||
-    msg.includes("UNAUTHENTICATED") ||
-    msg.includes("401") ||
-    msg.includes("403") ||
+    msg.includes("API_KEY_NOT_FOUND") ||
     msg.includes("invalid API key") ||
-    msg.includes("authentication credentials")
+    msg.includes("pass a valid API key")
   ) {
-    return "API Key không hợp lệ, chưa được kích hoạt hoặc đã bị thu hồi. Vui lòng mở 'Cài đặt API Key' (hoặc biểu tượng Key ở thanh trên cùng), kiểm tra và nhập lại API Key chuẩn bắt đầu bằng 'AIzaSy...'.";
+    return "API Key không hợp lệ hoặc bị dán thiếu ký tự. Vui lòng mở 'Cài đặt API Key' (biểu tượng Key ở thanh trên cùng), xóa khoảng trắng thừa và dán lại đúng mã API Key bắt đầu bằng 'AIzaSy...' từ aistudio.google.com/apikey.";
   }
 
   if (
@@ -774,21 +739,27 @@ function cleanTopicString(topic: string, grade: string, subject: string = "Tin h
  *   + Total Vận dụng = 5 (0 MCQ + 2 TF VD + 1 SA VD + 2 TL VD) -> 3.0 điểm
  *   + Total points = 10.00
  */
-function normalizeMatrixAndSpecCounts(matrix: any[], spec: any[], subject?: string) {
+function normalizeMatrixAndSpecCounts(matrix: any[], spec: any[], subject?: string, grade?: string, period?: string) {
   if (!matrix || !Array.isArray(matrix) || matrix.length === 0) return;
 
-  const isMath = subject.toLowerCase().trim().includes("toán");
+  const isMath = (subject || "").toLowerCase().trim().includes("toán");
+  const isTin6GK1 = isTinHoc6GiuaKy1(subject, grade, period);
 
   // Helper to adjust array of integers to match a target sum
-  const adjustSum = (arr: number[], target: number) => {
+  const adjustSum = (arr: number[], target: number, allowedIndices?: number[]) => {
     let currentSum = arr.reduce((a, b) => a + b, 0);
     let diff = target - currentSum;
     if (diff === 0) return;
 
+    const indices = allowedIndices && allowedIndices.length > 0
+      ? allowedIndices
+      : arr.map((_, i) => i);
+
     if (diff > 0) {
       // Add to rows
       while (diff > 0) {
-        for (let i = arr.length - 1; i >= 0 && diff > 0; i--) {
+        for (let k = indices.length - 1; k >= 0 && diff > 0; k--) {
+          const i = indices[k];
           arr[i] += 1;
           diff -= 1;
         }
@@ -884,13 +855,24 @@ function normalizeMatrixAndSpecCounts(matrix: any[], spec: any[], subject?: stri
     const mcqThList = matrix.map(r => Number(r.mcq_th) || 0);
     const tfNbList = matrix.map(r => Number(r.tf_nb) || 0);
     const tfThList = matrix.map(r => Number(r.tf_th) || 0);
-    const tlVdList = matrix.map(r => Number(r.tl_vd) || 0);
+    const tlVdList = matrix.map((r) => {
+      if (isTin6GK1 && String(r.topic || "").toLowerCase().includes("chủ đề 2")) {
+        return 0;
+      }
+      return Number(r.tl_vd) || 0;
+    });
+
+    const allowedVdIndices = isTin6GK1
+      ? matrix
+          .map((r, idx) => (String(r.topic || "").toLowerCase().includes("chủ đề 1") ? idx : -1))
+          .filter(idx => idx !== -1)
+      : undefined;
 
     adjustSum(mcqNbList, 8);
     adjustSum(mcqThList, 4);
     adjustSum(tfNbList, 8);
     adjustSum(tfThList, 8);
-    adjustSum(tlVdList, 3);
+    adjustSum(tlVdList, 3, allowedVdIndices);
 
     matrix.forEach((r, idx) => {
       r.mcq_nb = mcqNbList[idx];
@@ -912,7 +894,7 @@ function normalizeMatrixAndSpecCounts(matrix: any[], spec: any[], subject?: stri
       r.totalPoints = Number(((r.total_nb * 0.25) + (r.total_th * 0.25) + (r.total_vd * 1.0)).toFixed(2));
     });
 
-    // Synchronize specification counts
+    // Synchronize specification counts with matrix
     if (spec && Array.isArray(spec) && spec.length > 0) {
       if (spec.length === matrix.length) {
         spec.forEach((s, idx) => {
@@ -955,6 +937,92 @@ app.use(express.urlencoded({ limit: "200mb", extended: true }));
 
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
+});
+
+// API Endpoints: Saved Exams
+app.post("/api/exams/save", async (req, res) => {
+  try {
+    const record = await saveExamRecord(req.body);
+    return res.json({ success: true, record });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message || "Lỗi khi lưu đề thi." });
+  }
+});
+
+app.post("/api/exams/list", async (req, res) => {
+  try {
+    const { subject, grade, userCode } = req.body || {};
+    const exams = await getAllSavedExams({ subject, grade, userCode });
+    return res.json({ success: true, exams });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message || "Lỗi lấy danh sách đề thi đã lưu." });
+  }
+});
+
+app.post("/api/exams/get", async (req, res) => {
+  try {
+    const { id } = req.body;
+    if (!id) return res.status(400).json({ success: false, error: "Thiếu mã ID đề thi." });
+    const exam = await getSavedExamById(id);
+    if (!exam) return res.status(404).json({ success: false, error: "Không tìm thấy đề thi đã lưu." });
+    return res.json({ success: true, exam });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/exams/delete", async (req, res) => {
+  try {
+    const { id } = req.body;
+    if (!id) return res.status(400).json({ success: false, error: "Thiếu mã ID đề thi cần xóa." });
+    await deleteSavedExam(id);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// API Endpoints: Saved Study Guides
+app.post("/api/study-guides/save", async (req, res) => {
+  try {
+    const record = await saveStudyGuideRecord(req.body);
+    return res.json({ success: true, record });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message || "Lỗi khi lưu đề cương ôn tập." });
+  }
+});
+
+app.post("/api/study-guides/list", async (req, res) => {
+  try {
+    const { subject, grade, userCode } = req.body || {};
+    const guides = await getAllSavedStudyGuides({ subject, grade, userCode });
+    return res.json({ success: true, guides });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message || "Lỗi lấy danh sách đề cương đã lưu." });
+  }
+});
+
+app.post("/api/study-guides/get", async (req, res) => {
+  try {
+    const { id } = req.body;
+    if (!id) return res.status(400).json({ success: false, error: "Thiếu mã ID đề cương." });
+    const guide = await getSavedStudyGuideById(id);
+    if (!guide) return res.status(404).json({ success: false, error: "Không tìm thấy đề cương đã lưu." });
+    return res.json({ success: true, guide });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/study-guides/delete", async (req, res) => {
+  try {
+    const { id } = req.body;
+    if (!id) return res.status(400).json({ success: false, error: "Thiếu mã ID đề cương cần xóa." });
+    await deleteSavedStudyGuide(id);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 // Master Admin Secret Key: support 123456 as requested, and 0989982818
@@ -1532,6 +1600,7 @@ Hãy xuất kết quả DƯỚI DẠNG JSON duy nhất theo cấu trúc:
       });
 
       parsedData.matrix = normalizeMatrixPercentagesBackend(parsedData.matrix, isCuoiHk1);
+      normalizeMatrixAndSpecCounts(parsedData.matrix, [], subject, String(grade), period);
     }
 
     if (parsedData.endContent) {
@@ -1551,16 +1620,34 @@ Hãy xuất kết quả DƯỚI DẠNG JSON duy nhất theo cấu trúc:
     userApiKeys,
     userCode
   }: any) {
+    // Dập khuôn chuẩn Bảng đặc tả Tin học 6 Giữa học kỳ I theo tài liệu chuẩn và đồng bộ số câu theo từng bài từ Ma trận
+    if (isTinHoc6GiuaKy1(subject, String(grade), period)) {
+      if (matrix && Array.isArray(matrix)) {
+        normalizeMatrixAndSpecCounts(matrix, [], subject, String(grade), period);
+      }
+      return {
+        specification: syncSpecificationWithMatrix(
+          TIN_HOC_6_GIUA_HK1_SPECIFICATION,
+          matrix,
+          subject,
+          String(grade),
+          period
+        )
+      };
+    }
+
     const systemPrompt = `Bạn là AI Chuyên gia Khảo thí môn ${subject} cấp THCS theo GDPT 2018 (Kết nối tri thức).
 Nhiệm vụ: Lập DUY NHẤT BẢNG ĐẶC TẢ ĐỀ KIỂM TRA môn ${subject} Lớp ${grade} (${period}) tương ứng 100% với Khung Ma trận sau.
 
 KHUNG MA TRẬN ĐÃ LẬP:
 ${JSON.stringify(matrix, null, 2)}
 
-QUY TẮC LẬP BẢNG ĐẶC TẢ:
+[QUY TẮC KIỂM TRA ĐẶC BIỆT KHI LẬP BẢNG ĐẶC TẢ - BẮT BUỘC TUÂN THỦ 100%]:
 1. Mọi bài học có trong Ma trận BẮT BUỘC xuất hiện 1 dòng tương ứng trong Bảng đặc tả.
-2. Mô tả "nb_desc" (Nhận biết), "th_desc" (Thông hiểu), "vd_desc" (Vận dụng) chi tiết năng lực Yêu cầu cần đạt.
-3. Cột "nb_count", "th_count", "vd_count" khớp với tổng số câu/lệnh hỏi tương ứng trong Ma trận.
+2. HOÀN THIỆN BẢNG ĐẶC TẢ CHI TIẾT (TUYỆT ĐỐI KHÔNG ĐỂ TRỐNG):
+   - Ở phần Bảng đặc tả, các ô mô tả mức độ đánh giá ("nb_desc" cho Nhận biết, "th_desc" cho Thông hiểu, "vd_desc" cho Vận dụng) và số lượng câu hỏi ("nb_count", "th_count", "vd_count") PHẢI được điền đầy đủ tương ứng với Ma trận.
+   - TUYỆT ĐỐI KHÔNG ĐƯỢC để trống hoặc ghi chung chung là "Không có yêu cầu" nếu ma trận đã phân bổ điểm/câu ở mức độ đó (đặc biệt ở mức độ Vận dụng của các bài có câu hỏi Tự luận).
+3. Cột "nb_count", "th_count", "vd_count" khớp 100% với tổng số câu/lệnh hỏi tương ứng trong Ma trận.
 
 Hãy xuất kết quả DƯỚI DẠNG JSON duy nhất theo cấu trúc:
 {
@@ -1568,12 +1655,12 @@ Hãy xuất kết quả DƯỚI DẠNG JSON duy nhất theo cấu trúc:
     {
       "topic": "Chủ đề 1. Máy tính và cộng đồng",
       "content": "Bài 1. Tên bài",
-      "nb_desc": "- Nhận biết được...",
-      "th_desc": "- Thông hiểu...",
-      "vd_desc": "- Vận dụng...",
+      "nb_desc": "– Nhận biết được...",
+      "th_desc": "– Thông hiểu...",
+      "vd_desc": "– Vận dụng...",
       "nb_count": 3,
       "th_count": 1,
-      "vd_count": 0
+      "vd_count": 1
     }
   ]
 }`;
@@ -1606,8 +1693,16 @@ Hãy xuất kết quả DƯỚI DẠNG JSON duy nhất theo cấu trúc:
     }
 
     if (matrix && parsedData.specification) {
-      normalizeMatrixAndSpecCounts(matrix, parsedData.specification, subject);
+      normalizeMatrixAndSpecCounts(matrix, parsedData.specification, subject, String(grade), period);
     }
+
+    parsedData.specification = syncSpecificationWithMatrix(
+      parsedData.specification,
+      matrix,
+      subject,
+      String(grade),
+      period
+    );
 
     return parsedData;
   }
@@ -1699,6 +1794,247 @@ Hãy xuất kết quả DƯỚI DẠNG JSON duy nhất theo cấu trúc:
       return res.status(500).json({ error: formatVietnameseError(error) });
     }
   });
+  // Deterministic post-processor to guarantee 100% equal distribution of A, B, C, D answers
+  function balanceMcqQuestions(mcqList: any[], seedCode: string = "101"): any[] {
+    if (!Array.isArray(mcqList) || mcqList.length === 0) return [];
+    const LETTERS = ["A", "B", "C", "D"];
+    const n = mcqList.length;
+    const baseCount = Math.floor(n / 4);
+    const rem = n % 4;
+    const targetPool: string[] = [];
+    for (let i = 0; i < baseCount; i++) {
+      targetPool.push("A", "B", "C", "D");
+    }
+    const seedNum = Array.from(String(seedCode || "101")).reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+    for (let r = 0; r < rem; r++) {
+      targetPool.push(LETTERS[(seedNum + r) % 4]);
+    }
+
+    // Shuffle targetPool
+    for (let i = targetPool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [targetPool[i], targetPool[j]] = [targetPool[j], targetPool[i]];
+    }
+
+    // Eliminate consecutive identical answers (so A, B, C, D alternate smoothly without streaks)
+    for (let pass = 0; pass < 4; pass++) {
+      for (let i = 1; i < targetPool.length; i++) {
+        if (targetPool[i] === targetPool[i - 1]) {
+          for (let j = 0; j < targetPool.length; j++) {
+            if (
+              j !== i &&
+              j !== i - 1 &&
+              targetPool[j] !== targetPool[i] &&
+              (j === 0 || targetPool[j - 1] !== targetPool[i]) &&
+              (j === targetPool.length - 1 || targetPool[j + 1] !== targetPool[i]) &&
+              targetPool[j] !== targetPool[i - 1] &&
+              (i === targetPool.length - 1 || targetPool[j] !== targetPool[i + 1])
+            ) {
+              [targetPool[i], targetPool[j]] = [targetPool[j], targetPool[i]];
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    return mcqList.map((q: any, idx: number) => {
+      const rawOpts = Array.isArray(q.options) ? q.options : [];
+      const bodies = [0, 1, 2, 3].map((i) => {
+        const optStr = String(rawOpts[i] || `Phương án ${LETTERS[i]}`).trim();
+        return optStr.replace(/^[A-Da-d][\.\)\:\-]\s*/, "").trim();
+      });
+
+      const matchLetter = String(q.correctAnswer || "A").trim().toUpperCase().match(/[ABCD]/);
+      const currLetter = matchLetter ? matchLetter[0] : "A";
+      const currIdx = LETTERS.indexOf(currLetter);
+      const targetLetter = targetPool[idx] || LETTERS[idx % 4];
+      const targetIdx = LETTERS.indexOf(targetLetter);
+
+      let explanation = q.explanation || "";
+      if (currIdx !== -1 && targetIdx !== -1 && currIdx !== targetIdx) {
+        // Swap option text between current correct position and target balanced position
+        const temp = bodies[currIdx];
+        bodies[currIdx] = bodies[targetIdx];
+        bodies[targetIdx] = temp;
+
+        if (typeof explanation === "string" && explanation) {
+          explanation = explanation.replace(
+            new RegExp(`(Đáp án|đáp án|Phương án|phương án|Chọn|chọn)\\s+(đúng\\s+là\\s+)?${currLetter}\\b`, "g"),
+            `$1 $2${targetLetter}`
+          );
+        }
+      }
+
+      return {
+        ...q,
+        id: idx + 1,
+        options: bodies.map((b, i) => `${LETTERS[i]}. ${b}`),
+        correctAnswer: targetLetter,
+        explanation
+      };
+    });
+  }
+
+  // Deterministic post-processor to diversify True/False statement orders across questions while keeping 2 True & 2 False
+  function balanceTfQuestions(tfList: any[], seedCode: string = "101", isMath: boolean = false): any[] {
+    if (!Array.isArray(tfList) || tfList.length === 0) return [];
+    const TF_PATTERNS = [
+      [true, false, false, true],
+      [false, true, true, false],
+      [true, true, false, false],
+      [false, false, true, true],
+      [true, false, true, false],
+      [false, true, false, true]
+    ];
+    const seedNum = Array.from(String(seedCode || "101")).reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+    const stmtIds = ["a", "b", "c", "d"];
+
+    return tfList.map((q: any, idx: number) => {
+      const rawStmts = Array.isArray(q.statements) ? q.statements : [];
+      if (rawStmts.length !== 4) {
+        return { ...q, id: 13 + idx };
+      }
+      const trueStmts = rawStmts.filter((s: any) => Boolean(s.isTrue));
+      const falseStmts = rawStmts.filter((s: any) => !s.isTrue);
+
+      if (trueStmts.length === 2 && falseStmts.length === 2) {
+        const pattern = TF_PATTERNS[(seedNum + idx) % TF_PATTERNS.length];
+        let tIdx = 0;
+        let fIdx = 0;
+        const reordered = pattern.map((wantTrue, sIdx) => {
+          const picked = wantTrue ? trueStmts[tIdx++] : falseStmts[fIdx++];
+          const cleanText = String(picked?.text || "").replace(/^[a-dA-D][\.\)\:\-]\s*/, "").trim();
+          return {
+            id: stmtIds[sIdx],
+            text: cleanText,
+            isTrue: wantTrue
+          };
+        });
+        return {
+          ...q,
+          id: 13 + idx,
+          statements: reordered
+        };
+      }
+
+      return {
+        ...q,
+        id: 13 + idx,
+        statements: rawStmts.map((s: any, sIdx: number) => ({
+          id: stmtIds[sIdx] || s.id,
+          text: String(s?.text || "").replace(/^[a-dA-D][\.\)\:\-]\s*/, "").trim(),
+          isTrue: Boolean(s?.isTrue)
+        }))
+      };
+    });
+  }
+
+  // Helper to extract terminology/folder/path hints from existing questions & reference variants (Rule 2)
+  function extractTerminologyAndPathHints(
+    existingMcq?: any[],
+    existingTf?: any[],
+    referenceVariants?: any[]
+  ): { canonicalTinHocFolder: string | null; pathExamples: string[] } {
+    const texts: string[] = [];
+    const collectFromMcq = (list?: any[]) => {
+      if (!Array.isArray(list)) return;
+      list.forEach((q) => {
+        if (q?.question) texts.push(String(q.question));
+        if (Array.isArray(q?.options)) q.options.forEach((o: any) => texts.push(String(o)));
+      });
+    };
+    const collectFromTf = (list?: any[]) => {
+      if (!Array.isArray(list)) return;
+      list.forEach((q) => {
+        if (q?.question) texts.push(String(q.question));
+        if (Array.isArray(q?.statements)) q.statements.forEach((s: any) => texts.push(String(s?.text || "")));
+      });
+    };
+    const collectFromApplied = (list?: any[]) => {
+      if (!Array.isArray(list)) return;
+      list.forEach((q) => {
+        if (q?.question) texts.push(String(q.question));
+        if (q?.answer) texts.push(String(q.answer));
+      });
+    };
+
+    collectFromMcq(existingMcq);
+    collectFromTf(existingTf);
+    if (Array.isArray(referenceVariants)) {
+      referenceVariants.forEach((v) => {
+        collectFromMcq(v?.mcq);
+        collectFromTf(v?.tf);
+        collectFromApplied(v?.applied);
+      });
+    }
+
+    const joined = texts.join("\n");
+    const pathMatches = joined.match(/[A-Za-z]:\\[A-Za-z0-9_\\.\-]+/g) || [];
+    const uniquePaths = Array.from(new Set(pathMatches)).slice(0, 6);
+
+    // Check if 'TinHoc' is used as a folder name in paths or quotes
+    let canonicalTinHocFolder: string | null = null;
+    if (/\bTinHoc\b/.test(joined)) {
+      canonicalTinHocFolder = "TinHoc";
+    } else {
+      const m = joined.match(/\b(TinHoc[6789]?)\b/);
+      if (m) canonicalTinHocFolder = m[1];
+    }
+
+    return {
+      canonicalTinHocFolder,
+      pathExamples: uniquePaths
+    };
+  }
+
+  // Deterministic post-processor to unify folder/path terminology across MCQ, TF, and Applied (Rule 2)
+  function synchronizePartTerminology(
+    parsed: any,
+    canonicalFolder: string | null
+  ) {
+    if (!parsed) return parsed;
+    const targetFolder = canonicalFolder || "TinHoc";
+    const normalizeFolderTokens = (str: any): any => {
+      if (!str || typeof str !== "string") return str;
+      // Unify inconsistent TinHoc6 / TinHoc7 / TinHoc8 / TinHoc9 folder names to the canonical folder name (e.g. TinHoc)
+      return str.replace(/\bTinHoc[6789]\b/g, targetFolder);
+    };
+
+    if (Array.isArray(parsed.mcq)) {
+      parsed.mcq = parsed.mcq.map((q: any) => ({
+        ...q,
+        question: normalizeFolderTokens(q.question),
+        options: Array.isArray(q.options) ? q.options.map(normalizeFolderTokens) : q.options,
+        explanation: normalizeFolderTokens(q.explanation)
+      }));
+    }
+    if (Array.isArray(parsed.tf)) {
+      parsed.tf = parsed.tf.map((q: any) => ({
+        ...q,
+        question: normalizeFolderTokens(q.question),
+        statements: Array.isArray(q.statements)
+          ? q.statements.map((s: any) => ({ ...s, text: normalizeFolderTokens(s.text) }))
+          : q.statements,
+        explanation: normalizeFolderTokens(q.explanation)
+      }));
+    }
+    if (Array.isArray(parsed.applied)) {
+      parsed.applied = parsed.applied.map((q: any) => ({
+        ...q,
+        question: normalizeFolderTokens(q.question),
+        answer: normalizeFolderTokens(q.answer),
+        pointsBreakdown: Array.isArray(q.pointsBreakdown)
+          ? q.pointsBreakdown.map((pb: any) => ({
+              ...pb,
+              criteria: normalizeFolderTokens(pb.criteria)
+            }))
+          : q.pointsBreakdown
+      }));
+    }
+    return parsed;
+  }
+
   // Helper function to generate a specific part of an exam variant
   async function generateExamPart({
     partName,
@@ -1708,21 +2044,100 @@ Hãy xuất kết quả DƯỚI DẠNG JSON duy nhất theo cấu trúc:
     examFormat = "Tự luận",
     examCode = "101",
     matrix,
-    specification,
+    specification: rawSpecification,
+    existingMcq,
+    existingTf,
+    referenceVariants,
     referenceFiles,
     userApiKeys,
     userCode
   }: any) {
     const isMath = subject.toLowerCase().trim().includes("toán");
+    const { mcqPlan, saPlan, appliedPlan, syncedSpec: specification } = extractMatrixQuestionPlan(
+      matrix,
+      rawSpecification,
+      subject,
+      String(grade),
+      period
+    );
+
+    const { canonicalTinHocFolder, pathExamples } = extractTerminologyAndPathHints(
+      existingMcq,
+      existingTf,
+      referenceVariants
+    );
+
+    const refVariant =
+      Array.isArray(referenceVariants) && referenceVariants.length > 0
+        ? referenceVariants[0]
+        : null;
+
+    // Build explicit question-by-question assignment plan from matrix to prevent duplicate/similar questions and prevent lesson drift across variants
+    const mcqAllocationLines: string[] = mcqPlan.map(
+      (item, idx) =>
+        `- Câu ${item.id}: BẮT BUỘC thuộc "${item.content}" (${item.topic}) — Mức độ ${item.level.toUpperCase()} (Yêu cầu cần đạt: ${item.desc.replace(/\r?\n/g, " ")}; tuyệt đối không trùng ý với câu khác).`
+    );
+
+    const tfAllocationLines: string[] = [];
+    if (Array.isArray(matrix)) {
+      const tfRows = matrix.filter(
+        (r: any) => (Number(r.tf_nb) || 0) + (Number(r.tf_th) || 0) + (Number(r.tf_vd) || 0) > 0
+      );
+      const targetTfCount = isMath ? 2 : 4;
+      for (let t = 0; t < targetTfCount; t++) {
+        const r = tfRows[t % Math.max(1, tfRows.length)] || matrix[t % Math.max(1, matrix.length)];
+        if (r) {
+          tfAllocationLines.push(
+            `- Câu ${13 + t}: BẮT BUỘC thuộc bài "${r.content || r.topic}" (${r.topic || ""}) — Xây dựng 1 tình huống thực tiễn riêng biệt, 4 ý a, b, c, d kiểm tra 4 khía cạnh hoàn toàn khác nhau của bài học (2 ý Nhận biết, 2 ý Thông hiểu).`
+          );
+        }
+      }
+    }
+
+    const saAllocationLines: string[] = saPlan.map(
+      (item) =>
+        `- Câu ${item.id}: BẮT BUỘC thuộc "${item.content}" (${item.topic}) — Mức độ ${item.level.toUpperCase()} (${item.desc.replace(/\r?\n/g, " ")}).`
+    );
+
+    const appliedAllocationLines: string[] = appliedPlan.map(
+      (item) =>
+        `- Câu ${item.id} (1,0 điểm - Mức ${item.level}): BẮT BUỘC thuộc chính xác bài "${item.content}" (${item.topic}) — Yêu cầu cần đạt: ${item.desc.replace(/\r?\n/g, " ")}. TUYỆT ĐỐI KHÔNG ra câu hỏi lệch sang bài học khác!`
+    );
+
+    const specialVerificationRulesBlock = `
+[QUY TẮC KIỂM TRA ĐẶC BIỆT DÀNH CHO AI - BẮT BUỘC TUÂN THỦ TRƯỚC KHI XUẤT ĐỀ]:
+1. ĐỒNG BỘ HÓA MA TRẬN VÀ CÂU HỎI TỰ LUẬN (TRÁNH LỆCH BÀI):
+   - Khung ma trận và Bảng đặc tả đã phân bổ số lượng câu hỏi ở bài học nào thì TẤT CẢ các mã đề (Mã 001, Mã 002, Mã 101, Mã 102...) ĐỀU PHẢI có câu hỏi bám sát ĐÚNG bài học đó.
+   - TUYỆT ĐỐI KHÔNG để tình trạng Mã đề này ra tự luận vận dụng ở bài này, nhưng Mã đề kia lại ra tự luận vận dụng ở bài khác không khớp với ma trận và đặc tả.
+2. ĐỒNG NHẤT DỮ LIỆU VÀ THUẬT NGỮ TRONG ĐỀ THI:
+   - Các thuật ngữ, tên thư mục, đường dẫn (ví dụ: thư mục '${canonicalTinHocFolder || "TinHoc"}') nếu xuất hiện ở phần trắc nghiệm (như câu dẫn đường dẫn) thì PHẢI ĐƯỢC THỐNG NHẤT HỢP LÝ với phần tự luận ở các mã đề, tuyệt đối tránh gây mâu thuẫn tên gọi (như chỗ thì dùng TinHoc, chỗ lại dùng TinHoc${grade}).${pathExamples.length > 0 ? `\n   - Đường dẫn/thư mục đã xuất hiện trong đề để tham chiếu đồng bộ: ${pathExamples.join(", ")}` : ""}
+3. HOÀN THIỆN BẢNG ĐẶC TẢ & ĐÁP ÁN CHI TIẾT:
+   - Bám sát 100% các mức độ đánh giá (Nhận biết, Thông hiểu, Vận dụng) trong Bảng đặc tả.
+4. KIỂM TRA ĐỐI CHIẾU CÁC MÃ ĐỀ SONG SONG:
+   - Các mã đề song song (ví dụ Mã 001 và Mã 002, hoặc 101 và 102) phải có độ khó tương đương, cùng phạm vi kiến thức, cùng bài học ở từng câu và cùng ma trận phân bố điểm, nhưng phải được đảo trật tự câu hỏi hoặc thay đổi ngữ cảnh/tình huống tương đương để đảm bảo tính khảo thí độc lập.`;
 
     let partPrompt = "";
     if (partName === "part1" || partName === "mcq") {
+      const refMcqBlock =
+        refVariant && Array.isArray(refVariant.mcq) && refVariant.mcq.length > 0
+          ? `\nĐỐI CHIẾU MÃ ĐỀ GỐC (${refVariant.code}) ĐỂ TẠO MÃ ĐỀ SONG SONG (${examCode}) ĐỘC LẬP NHƯNG CÙNG ĐỘ KHÓ & CÙNG PHẠM VI BÀI HỌC:\n${JSON.stringify(
+              refVariant.mcq.map((q: any) => ({ id: q.id, question: q.question })),
+              null,
+              2
+            )}\n(Yêu cầu cho Mã đề ${examCode}: Giữ nguyên bài học và mức độ nhận thức của từng câu theo Ma trận, nhưng thay đổi ngữ cảnh/số liệu tương đương hoặc đảo vị trí câu hỏi trong cùng mức độ để đảm bảo tính khảo thí độc lập và thống nhất thuật ngữ/tên thư mục '${canonicalTinHocFolder || "TinHoc"}').\n`
+          : "";
+
       partPrompt = `Bạn là AI Chuyên gia Khảo thí môn ${subject} cấp THCS (GDPT 2018).
 Nhiệm vụ: Biên soạn duy nhất PHẦN 1: TRẮC NGHIỆM NHIỀU LỰA CHỌN (12 CÂU HỎI, từ Câu 1 đến Câu 12) cho Mã đề ${examCode} môn ${subject} ${grade} (${period}).
-LƯU Ý BẮT BUỘC:
+${specialVerificationRulesBlock}
+LƯU Ý BẮT BUỘC (TUÂN THỦ 100%):
 1. Dựa sát 100% vào Bảng đặc tả và Ma trận được cung cấp.
-2. ĐỦ 12 CÂU HỎI. Đáp án đúng A, B, C, D phân bố đều (mỗi phương án 3 câu đúng).
-3. Mỗi câu có 4 lựa chọn "A. ...", "B. ...", "C. ...", "D. ...".
+2. ĐỦ 12 CÂU HỎI. Đáp án đúng A, B, C, D PHẢI PHÂN BỐ ĐỀU NHAU (Đúng 3 câu đáp án A, 3 câu đáp án B, 3 câu đáp án C, 3 câu đáp án D).
+3. CẤM TUYỆT ĐỐI TẠO CÁC CÂU HỎI HOẶC CÁC Ý LỰA CHỌN GIỐNG NHAU / TƯƠNG TỰ NHAU:
+   - 12 câu hỏi phải kiểm tra 12 đơn vị kiến thức / khái niệm / thiết bị / tình huống / dạng bài HOÀN TOÀN KHÁC NHAU. Không được có 2 câu hỏi hỏi cùng 1 ý chỉ đổi chữ!
+   - Trong mỗi câu hỏi, 4 phương án "A. ...", "B. ...", "C. ...", "D. ..." phải khác biệt rõ ràng, ngắn gọn, chuẩn thuật ngữ SGK, tuyệt đối không có 2 phương án trùng ý.
+   - Nếu có câu hỏi về đường dẫn / thư mục, thống nhất dùng tên thư mục chuẩn là '${canonicalTinHocFolder || "TinHoc"}' (không dùng TinHoc${grade}).
+${mcqAllocationLines.length > 0 ? `\nPHÂN BỔ CHI TIẾT TỪNG CÂU HỎI THEO MA TRẬN (BẮT BUỘC BÁM SÁT):\n${mcqAllocationLines.join("\n")}\n` : ""}${refMcqBlock}
 ${isMath ? '4. Các công thức toán dùng LaTeX giữa dấu $. Với câu hỏi hình học, cung cấp mã SVG hợp lệ vào figureSvg.' : ''}
 
 MA TRẬN:
@@ -1736,6 +2151,7 @@ Hãy xuất kết quả DƯỚI DẠNG JSON duy nhất theo cấu trúc:
   "mcq": [
     {
       "id": 1,
+      "lesson": "Bài 1. Tên bài học",
       "question": "Nội dung câu hỏi 1",
       "options": ["A. Lựa chọn A", "B. Lựa chọn B", "C. Lựa chọn C", "D. Lựa chọn D"],
       "correctAnswer": "A",
@@ -1747,11 +2163,23 @@ Hãy xuất kết quả DƯỚI DẠNG JSON duy nhất theo cấu trúc:
   ]
 }`;
     } else if (partName === "part2" || partName === "tf") {
+      const refTfBlock =
+        refVariant && Array.isArray(refVariant.tf) && refVariant.tf.length > 0
+          ? `\nĐỐI CHIẾU MÃ ĐỀ GỐC (${refVariant.code}) ĐỂ TẠO MÃ ĐỀ SONG SONG (${examCode}) TƯƠNG ĐƯƠNG ĐỘ KHÓ VÀ CÙNG BÀI HỌC:\n${JSON.stringify(
+              refVariant.tf.map((q: any) => ({ id: q.id, question: q.question })),
+              null,
+              2
+            )}\n(Yêu cầu cho Mã đề ${examCode}: Mỗi câu lớn Đúng-Sai bám sát đúng bài học tương ứng trong Ma trận nhưng thay đổi bối cảnh/phát biểu tương đương so với Mã đề ${refVariant.code}).\n`
+          : "";
+
       partPrompt = `Bạn là AI Chuyên gia Khảo thí môn ${subject} cấp THCS (GDPT 2018).
 Nhiệm vụ: Biên soạn duy nhất PHẦN 2: TRẮC NGHIỆM ĐÚNG - SAI (${isMath ? "02 CÂU HỎI LỚN (Câu 13, Câu 14)" : "04 CÂU HỎI LỚN (Câu 13, Câu 14, Câu 15, Câu 16)"}) cho Mã đề ${examCode} môn ${subject} ${grade} (${period}).
+${specialVerificationRulesBlock}
 LƯU Ý BẮT BUỘC:
 1. Dựa sát 100% vào Bảng đặc tả và Ma trận.
-2. Mỗi câu hỏi lớn có 4 ý a, b, c, d. BẮT BUỘC MỖI CÂU LỚN CÓ ĐÚNG 2 Ý ĐÚNG VÀ 2 Ý SAI.
+2. Mỗi câu hỏi lớn có 4 ý a, b, c, d. BẮT BUỘC MỖI CÂU LỚN CÓ ĐÚNG 2 Ý ĐÚNG VÀ 2 Ý SAI (xáo trộn ngẫu nhiên vị trí Đúng/Sai giữa a, b, c, d).
+3. CẤM TUYỆT ĐỐI LẶP LẠI Ý PHÁT BIỂU: 4 ý a, b, c, d trong mỗi câu và giữa các câu lớn phải khai thác các khía cạnh hoàn toàn khác nhau, không trùng lặp nội dung.
+${tfAllocationLines.length > 0 ? `\nPHÂN BỔ CHI TIẾT TỪNG CÂU LỚN ĐÚNG - SAI THEO MA TRẬN:\n${tfAllocationLines.join("\n")}\n` : ""}${refTfBlock}
 
 MA TRẬN:
 ${JSON.stringify(matrix, null, 2)}
@@ -1764,12 +2192,13 @@ Hãy xuất kết quả DƯỚI DẠNG JSON duy nhất theo cấu trúc:
   "tf": [
     {
       "id": 13,
+      "lesson": "Bài X. Tên bài học",
       "question": "Bối cảnh/Thân câu hỏi lớn 13",
       "statements": [
         { "id": "a", "text": "Phát biểu a", "isTrue": true },
         { "id": "b", "text": "Phát biểu b", "isTrue": false },
-        { "id": "c", "text": "Phát biểu c", "isTrue": true },
-        { "id": "d", "text": "Phát biểu d", "isTrue": false }
+        { "id": "c", "text": "Phát biểu c", "isTrue": false },
+        { "id": "d", "text": "Phát biểu d", "isTrue": true }
       ]${isMath ? `,
       "hasFigure": false,
       "figureSvg": "<svg viewBox=\\"0 0 250 160\\" xmlns=\\"http://www.w3.org/2000/svg\\">...</svg>",
@@ -1783,9 +2212,11 @@ Hãy xuất kết quả DƯỚI DẠNG JSON duy nhất theo cấu trúc:
       }
       partPrompt = `Bạn là AI Chuyên gia Khảo thí môn ${subject} cấp THCS (GDPT 2018).
 Nhiệm vụ: Biên soạn duy nhất PHẦN 3: TRẮC NGHIỆM TRẢ LỜI NGẮN (04 CÂU HỎI, từ Câu 15 đến Câu 18) cho Mã đề ${examCode} môn ${subject} ${grade} (${period}).
+${specialVerificationRulesBlock}
 LƯU Ý BẮT BUỘC:
 1. Dựa sát 100% vào Bảng đặc tả và Ma trận.
-2. Yêu cầu tính toán ra đáp số/kết quả ngắn gọn.
+2. Yêu cầu tính toán ra đáp số/kết quả ngắn gọn, 4 câu thuộc 4 dạng bài khác nhau theo đúng phân bổ bên dưới.
+${saAllocationLines.length > 0 ? `\nPHÂN BỔ CHI TIẾT TỪNG CÂU TRẢ LỜI NGẮN THEO MA TRẬN:\n${saAllocationLines.join("\n")}\n` : ""}
 
 MA TRẬN:
 ${JSON.stringify(matrix, null, 2)}
@@ -1798,6 +2229,7 @@ Hãy xuất kết quả DƯỚI DẠNG JSON duy nhất theo cấu trúc:
   "shortAnswer": [
     {
       "id": 15,
+      "lesson": "Bài X. Tên bài học",
       "question": "Nội dung câu hỏi 15",
       "answer": "120",
       "unit": "cm2",
@@ -1809,7 +2241,6 @@ Hãy xuất kết quả DƯỚI DẠNG JSON duy nhất theo cấu trúc:
   ]
 }`;
     } else if (partName === "part4" || partName === "applied") {
-      const isTinHoc = subject.toLowerCase().trim() === "tin học";
       const isPracticeFormat = (examFormat || "").toLowerCase().includes("thực hành");
 
       const formatRules = isPracticeFormat
@@ -1819,16 +2250,36 @@ Hãy xuất kết quả DƯỚI DẠNG JSON duy nhất theo cấu trúc:
    - Tuyệt đối không ra đề chung chung mập mờ để học sinh tự suy đoán.`
         : `4. QUY TẮC BẮT BUỘC THEO HÌNH THỨC TỰ LUẬN TRÊN GIẤY (LƯU Ý TỐI THƯỢNG):
    - Giáo viên đã cấu hình hình thức: TỰ LUẬN TRÊN GIẤY (BÀI TẬP VIẾT).
-   - TOÀN BỘ 03 CÂU PHẢI LÀ BÀI TẬP TỰ LUẬN LÀM TRÊN GIẤY: Các bài tập tính toán dung lượng dữ liệu, phân tích biểu diễn thông tin, xây dựng thuật toán / vẽ sơ đồ khối, giải thích khái niệm hoặc xử lý tình huống thực tế bằng bài viết trên giấy thi.
+   - TOÀN BỘ 03 CÂU PHẢI LÀ BÀI TẬP TỰ LUẬN LÀM TRÊN GIẤY: Các bài tập tính toán dung lượng dữ liệu, phân tích biểu diễn thông tin, xây dựng thuật toán / vẽ sơ đồ khối, giải thích khái niệm, thiết kế cây thư mục/đường dẫn trên giấy hoặc xử lý tình huống thực tế bằng bài viết trên giấy thi.
    - CẤM TUYỆT ĐỐI RA ĐỀ BÀI THAO TÁC PHÒNG MÁY TÍNH (như bật máy tính, nháy chuột, tạo thư mục trên ổ đĩa máy tính, chạy phần mềm máy tính).
    - CẤM TUYỆT ĐỐI GHI NHÃN HOẶC TIỀN TỐ '(Thực hành)' HAY '(Lý thuyết)' Ở ĐẦU CÂU HỎI. Viết trực tiếp nội dung đề bài chuẩn mực sư phạm.`;
 
+      const refAppliedBlock =
+        refVariant && Array.isArray(refVariant.applied) && refVariant.applied.length > 0
+          ? `\nĐỐI CHIẾU CÂU HỎI TỰ LUẬN CỦA MÃ ĐỀ GỐC (${refVariant.code}) ĐỂ ĐỒNG BỘ 100% BÀI HỌC CHO MÃ ĐỀ ${examCode}:\n${JSON.stringify(
+              refVariant.applied.map((q: any) => ({
+                id: q.id,
+                lesson: q.lesson,
+                question: q.question
+              })),
+              null,
+              2
+            )}\nLƯU Ý SỐNG CÒN KHI SOẠN MÃ ĐỀ ${examCode}:
+- Câu ${isMath ? "19, 20, 21" : "17, 18, 19"} của Mã đề ${examCode} BẮT BUỘC PHẢI THUỘC ĐÚNG CÙNG BÀI HỌC như phân bổ của Ma trận và tương ứng 1-1 với Câu ${isMath ? "19, 20, 21" : "17, 18, 19"} của Mã đề ${refVariant.code}!
+- TUYỆT ĐỐI KHÔNG ĐƯỢC ĐỔI SANG BÀI HỌC KHÁC! Chỉ thay đổi tình huống/ngữ cảnh/số liệu tương đương trong cùng bài học đó và giữ nguyên tên thư mục gốc '${canonicalTinHocFolder || "TinHoc"}' nếu câu hỏi liên quan đến cây thư mục/đường dẫn.\n`
+          : "";
+
       partPrompt = `Bạn là AI Chuyên gia Khảo thí môn ${subject} cấp THCS (GDPT 2018).
 Nhiệm vụ: Biên soạn duy nhất PHẦN B: CÂU HỎI ${isPracticeFormat ? "THỰC HÀNH TRÊN MÁY TÍNH" : "TỰ LUẬN"} (03 CÂU HỎI, ${isMath ? "Câu 19 đến Câu 21" : "Câu 17 đến Câu 19"}) cho Mã đề ${examCode} môn ${subject} ${grade} (${period}).
+${specialVerificationRulesBlock}
+
+★ PHÂN BỔ BẮT BUỘC TỪNG CÂU TỰ LUẬN THEO ĐÚNG MA TRẬN & ĐẶC TẢ (TUYỆT ĐỐI KHÔNG LỆCH BÀI):
+${appliedAllocationLines.join("\n")}
+${refAppliedBlock}
 LƯU Ý BẮT BUỘC:
-1. Dựa sát 100% vào Bảng đặc tả và Ma trận.
+1. Từng câu hỏi (${isMath ? "Câu 19, Câu 20, Câu 21" : "Câu 17, Câu 18, Câu 19"}) PHẢI bám sát 100% đúng bài học đã chỉ định ở mục PHÂN BỔ BẮT BUỘC phía trên. Nếu Ma trận phân bổ câu Tự luận Vận dụng ở bài nào (ví dụ: Bài 5 - Ứng xử trên mạng), thì BẮT BUỘC câu đó phải ra đúng bài học đó!
 2. Mỗi câu 1,0 điểm, kèm đáp án và thang điểm/rubric chi tiết đến 0,25đ hoặc 0,5đ.
-3. Lời giải và đáp án viết súc tích, đầy đủ ý chuẩn mực khoa học/sư phạm, không lan man rườm rà.
+3. Lời giải và đáp án viết súc tích, đầy đủ ý chuẩn mực khoa học/sư phạm, đồng nhất 100% thuật ngữ và tên thư mục (dùng '${canonicalTinHocFolder || "TinHoc"}', tuyệt đối không dùng lệch sang 'TinHoc${grade}').
 ${formatRules}
 
 MA TRẬN:
@@ -1842,6 +2293,7 @@ Hãy xuất kết quả DƯỚI DẠNG JSON duy nhất theo cấu trúc:
   "applied": [
     {
       "id": ${isMath ? 19 : 17},
+      "lesson": "${appliedPlan[0]?.content || "Bài học"}",
       "question": "Nội dung câu hỏi ${isPracticeFormat ? "thực hành máy tính" : "tự luận trên giấy"}",
       "answer": "Đáp án và lời giải chi tiết",
       "pointsBreakdown": [
@@ -1874,7 +2326,29 @@ Hãy xuất kết quả DƯỚI DẠNG JSON duy nhất theo cấu trúc:
       }
     });
 
-    return extractAndParseJson(response.text);
+    let parsed = extractAndParseJson(response.text);
+    parsed = synchronizePartTerminology(parsed, canonicalTinHocFolder);
+
+    if (parsed && Array.isArray(parsed.mcq)) {
+      parsed.mcq = parsed.mcq.map((q: any, idx: number) => ({
+        ...q,
+        lesson: mcqPlan[idx]?.content || q.lesson || ""
+      }));
+      parsed.mcq = balanceMcqQuestions(parsed.mcq, examCode);
+    }
+    if (parsed && Array.isArray(parsed.tf)) {
+      parsed.tf = balanceTfQuestions(parsed.tf, examCode, isMath);
+    }
+    if (parsed && Array.isArray(parsed.applied)) {
+      const startId = isMath ? 19 : 17;
+      parsed.applied = parsed.applied.map((q: any, idx: number) => ({
+        ...q,
+        id: startId + idx,
+        lesson: appliedPlan[idx]?.content || q.lesson || "",
+        topic: appliedPlan[idx]?.topic || q.topic || ""
+      }));
+    }
+    return parsed;
   }
 
   // API Route for generating a variant exam code using the existing matrix and specification
@@ -1891,6 +2365,9 @@ Hãy xuất kết quả DƯỚI DẠNG JSON duy nhất theo cấu trúc:
         specification,
         examCode = "102",
         part,
+        existingMcq,
+        existingTf,
+        referenceVariants,
         referenceFiles,
         userApiKeys,
         userCode
@@ -1919,6 +2396,9 @@ Hãy xuất kết quả DƯỚI DẠNG JSON duy nhất theo cấu trúc:
           examCode,
           matrix,
           specification,
+          existingMcq,
+          existingTf,
+          referenceVariants,
           referenceFiles,
           userApiKeys,
           userCode
@@ -1926,19 +2406,76 @@ Hãy xuất kết quả DƯỚI DẠNG JSON duy nhất theo cấu trúc:
         return res.json(partResult);
       }
 
-      // If no specific part requested, generate all parts in parallel
-      const [p1, p2, p3, p4] = await Promise.all([
-        generateExamPart({ partName: "part1", subject, grade, period, examFormat, examCode, matrix, specification, referenceFiles, userApiKeys, userCode }),
-        generateExamPart({ partName: "part2", subject, grade, period, examFormat, examCode, matrix, specification, referenceFiles, userApiKeys, userCode }),
-        isMath ? generateExamPart({ partName: "part3", subject, grade, period, examFormat, examCode, matrix, specification, referenceFiles, userApiKeys, userCode }) : Promise.resolve({ shortAnswer: [] }),
-        generateExamPart({ partName: "part4", subject, grade, period, examFormat, examCode, matrix, specification, referenceFiles, userApiKeys, userCode })
+      // If no specific part requested, generate part1 first so its terminology can be synced with part2 and part4
+      const p1 = await generateExamPart({
+        partName: "part1",
+        subject,
+        grade,
+        period,
+        examFormat,
+        examCode,
+        matrix,
+        specification,
+        referenceVariants,
+        referenceFiles,
+        userApiKeys,
+        userCode
+      });
+      const [p2, p3, p4] = await Promise.all([
+        generateExamPart({
+          partName: "part2",
+          subject,
+          grade,
+          period,
+          examFormat,
+          examCode,
+          matrix,
+          specification,
+          existingMcq: p1?.mcq,
+          referenceVariants,
+          referenceFiles,
+          userApiKeys,
+          userCode
+        }),
+        isMath
+          ? generateExamPart({
+              partName: "part3",
+              subject,
+              grade,
+              period,
+              examFormat,
+              examCode,
+              matrix,
+              specification,
+              existingMcq: p1?.mcq,
+              referenceVariants,
+              referenceFiles,
+              userApiKeys,
+              userCode
+            })
+          : Promise.resolve({ shortAnswer: [] }),
+        generateExamPart({
+          partName: "part4",
+          subject,
+          grade,
+          period,
+          examFormat,
+          examCode,
+          matrix,
+          specification,
+          existingMcq: p1?.mcq,
+          referenceVariants,
+          referenceFiles,
+          userApiKeys,
+          userCode
+        })
       ]);
 
       const completeVariant = {
         code: examCode,
         title: `ĐỀ KIỂM TRA ${period.toUpperCase()} - MÔN ${subject.toUpperCase()} ${grade}`,
-        mcq: p1?.mcq || [],
-        tf: p2?.tf || [],
+        mcq: balanceMcqQuestions(p1?.mcq || [], examCode),
+        tf: balanceTfQuestions(p2?.tf || [], examCode, isMath),
         shortAnswer: p3?.shortAnswer || [],
         applied: p4?.applied || []
       };
@@ -2390,7 +2927,7 @@ Chỉ trả về JSON thuần tuý, không có markdown hay bất kỳ lời d�
       parsedStudyGuide.schoolYear = schoolYear;
       parsedStudyGuide.title = parsedStudyGuide.title || `ĐỀ CƯƠNG ÔN TẬP KIỂM TRA ${period.toUpperCase()}`;
       
-      parsedStudyGuide.mcq = mergedMcqs;
+      parsedStudyGuide.mcq = balanceMcqQuestions(mergedMcqs, "DECUONG");
       parsedStudyGuide.tf = mergedTfs;
       parsedStudyGuide.shortAnswer = mergedShortAnswers;
       parsedStudyGuide.applied = mergedApplieds;
@@ -2407,44 +2944,61 @@ Chỉ trả về JSON thuần tuý, không có markdown hay bất kỳ lời d�
   app.post("/api/test-key", async (req, res) => {
     try {
       const { key } = req.body;
-      if (!key || typeof key !== "string" || !key.trim()) {
+      const cleanKey = cleanApiKeyString(key);
+      if (!cleanKey) {
         return res.status(400).json({ ok: false, error: "Vui lòng nhập API Key để kiểm tra." });
       }
 
-      const cleanKey = key.trim();
-      const client = new GoogleGenAI({ apiKey: cleanKey });
-      
-      // Test generating a tiny 1-token output with the fastest standard model
-      const result = await client.models.generateContent({
-        model: "gemini-3.1-flash-lite",
-        contents: "Hi",
-        config: { maxOutputTokens: 5, thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } }
-      });
+      if (cleanKey.length < 20) {
+        return res.status(400).json({
+          ok: false,
+          error: "API Key quá ngắn hoặc không đúng định dạng (Key chuẩn của Google bắt đầu bằng 'AIzaSy...')."
+        });
+      }
 
-      if (result && result.text) {
-        return res.json({ ok: true, message: "API Key hợp lệ và đang hoạt động tốt!" });
+      const client = new GoogleGenAI({ apiKey: cleanKey });
+      const testModels = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"];
+
+      let lastErr: any = null;
+      for (const testModel of testModels) {
+        try {
+          const result = await client.models.generateContent({
+            model: testModel,
+            contents: "Hi",
+            config: { maxOutputTokens: 5 }
+          });
+          if (result) {
+            lastWorkingModel = testModel;
+            return res.json({ ok: true, message: `API Key hợp lệ và hoạt động tốt với cấu hình ${testModel}!` });
+          }
+        } catch (err: any) {
+          lastErr = err;
+          const msg = getErrorMessage(err);
+          // If Google explicitly says API_KEY_INVALID, stop immediately
+          if (
+            msg.includes("API_KEY_INVALID") ||
+            msg.includes("API key not valid") ||
+            msg.includes("API_KEY_NOT_FOUND") ||
+            msg.includes("pass a valid API key")
+          ) {
+            return res.status(401).json({
+              ok: false,
+              error: "API Key không hợp lệ hoặc bị dán sai ký tự. Vui lòng kiểm tra lại mã Key từ aistudio.google.com/apikey."
+            });
+          }
+        }
       }
-      return res.json({ ok: true, message: "API Key hợp lệ." });
-    } catch (err: any) {
-      const errMsg = getErrorMessage(err);
-      if (errMsg.includes("UNAUTHENTICATED") || errMsg.includes("401") || errMsg.includes("API_KEY_INVALID")) {
-        return res.status(401).json({
-          ok: false,
-          error: "Lỗi 401 (UNAUTHENTICATED): API Key không hợp lệ hoặc sai định dạng. Vui lòng lấy lại Key từ aistudio.google.com."
-        });
-      }
-      if (errMsg.includes("PERMISSION_DENIED") || errMsg.includes("403")) {
-        return res.status(403).json({
-          ok: false,
-          error: "Lỗi 403 (PERMISSION_DENIED): Dự án Google Cloud chứa Key này đã bị tạm khóa hoặc từ chối quyền truy cập."
-        });
-      }
-      if (errMsg.includes("RESOURCE_EXHAUSTED") || errMsg.includes("429")) {
+
+      const finalErrMsg = getErrorMessage(lastErr);
+      if (finalErrMsg.includes("RESOURCE_EXHAUSTED") || finalErrMsg.includes("429")) {
         return res.status(429).json({
           ok: false,
-          error: "Lỗi 429 (RESOURCE_EXHAUSTED): API Key đã sử dụng hết hạn mức (Quota). Vui lòng đổi Key khác."
+          error: "API Key đúng định dạng nhưng đang tạm chạm giới hạn lượt gọi miễn phí (Quota 429). Vui lòng đợi 1 phút hoặc thêm Key dự phòng."
         });
       }
+
+      return res.status(500).json({ ok: false, error: formatVietnameseError(lastErr) });
+    } catch (err: any) {
       return res.status(500).json({ ok: false, error: formatVietnameseError(err) });
     }
   });

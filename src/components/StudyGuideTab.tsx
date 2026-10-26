@@ -49,6 +49,9 @@ interface StudyGuideTabProps {
   teacherHeadName?: string;
   creatorName?: string;
   onOpenApiKeyModal?: () => void;
+  onSaveStudyGuide?: (guideData: any) => void;
+  onOpenStorageModal?: () => void;
+  loadedGuideData?: any;
 }
 
 function formatQuestionText(text: string) {
@@ -95,7 +98,10 @@ export function StudyGuideTab({
   bghName,
   teacherHeadName,
   creatorName,
-  onOpenApiKeyModal
+  onOpenApiKeyModal,
+  onSaveStudyGuide,
+  onOpenStorageModal,
+  loadedGuideData
 }: StudyGuideTabProps) {
   // Question Count Settings
   const isMath = subject.toLowerCase().trim().includes("toán");
@@ -114,6 +120,12 @@ export function StudyGuideTab({
   const [error, setError] = useState<string>("");
   const [studyGuideData, setStudyGuideData] = useState<StudyGuideData | null>(null);
   const [copySuccess, setCopySuccess] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (loadedGuideData) {
+      setStudyGuideData(loadedGuideData);
+    }
+  }, [loadedGuideData]);
 
   // Load Textbook Lessons based on Subject & Grade
   const getRepositoryTopics = () => {
@@ -417,10 +429,10 @@ export function StudyGuideTab({
                   onChange={(e) => setPeriod(e.target.value)}
                   className="w-full text-[11px] font-bold p-1.5 py-1 bg-slate-50 border border-slate-300 rounded-lg focus:ring-1 focus:ring-emerald-500"
                 >
-                  <option value="Giữa Học Kỳ I">Giữa Học Kỳ I</option>
-                  <option value="Cuối Học Kỳ I">Cuối Học Kỳ I</option>
-                  <option value="Giữa Học Kỳ II">Giữa Học Kỳ II</option>
-                  <option value="Cuối Học Kỳ II">Cuối Học Kỳ II</option>
+                  <option value="Giữa học kỳ I">Giữa học kỳ I</option>
+                  <option value="Cuối học kỳ I">Cuối học kỳ I</option>
+                  <option value="Giữa học kỳ II">Giữa học kỳ II</option>
+                  <option value="Cuối học kỳ II">Cuối học kỳ II</option>
                 </select>
               </div>
 
@@ -670,7 +682,31 @@ export function StudyGuideTab({
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  {onSaveStudyGuide && (
+                    <button
+                      type="button"
+                      onClick={() => onSaveStudyGuide(studyGuideData)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg shadow transition-all cursor-pointer"
+                      title="Lưu đề cương này vào Kho Lưu Trữ"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Lưu Đề Cương</span>
+                    </button>
+                  )}
+
+                  {onOpenStorageModal && (
+                    <button
+                      type="button"
+                      onClick={onOpenStorageModal}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-lg transition-all cursor-pointer border border-slate-700"
+                      title="Xem danh sách đề cương đã lưu"
+                    >
+                      <BookOpen className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Kho Lưu Trữ</span>
+                    </button>
+                  )}
+
                   <button
                     type="button"
                     onClick={handleCopyContent}

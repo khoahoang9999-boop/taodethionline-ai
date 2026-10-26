@@ -43,18 +43,26 @@ import {
   LogOut,
   Users,
   Edit3,
-  Pencil
+  Pencil,
+  FolderArchive
 } from "lucide-react";
 import MatrixView from "./components/MatrixView";
 import SpecificationView from "./components/SpecificationView";
 import ExamPaperView from "./components/ExamPaperView";
 import AnswerKeyView from "./components/AnswerKeyView";
 import QuestionEditModal from "./components/QuestionEditModal";
-import ScopeConfigModal, { ScopeConfigData, getDefaultScopeForPeriod } from "./components/ScopeConfigModal";
+import ScopeConfigModal, {
+  ScopeConfigData,
+  getDefaultScopeForPeriod,
+  getMatchingScopeForSelection,
+  isScopeMatchingSelection,
+} from "./components/ScopeConfigModal";
+import { parsePpctLessonsFromExcel } from "./lib/excel-parser";
 import ConfigTab from "./components/ConfigTab";
 import ExamWorkspace from "./components/ExamWorkspace";
 import AccountManagementTab from "./components/AccountManagementTab";
 import { StudyGuideTab } from "./components/StudyGuideTab";
+import { SavedStorageModal } from "./components/SavedStorageModal";
 import LoginModal from "./components/LoginModal";
 import ApiKeyModal, { ApiKeyItem } from "./components/ApiKeyModal";
 import UserProfileModal from "./components/UserProfileModal";
@@ -94,6 +102,9 @@ export default function App() {
   });
   const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState<boolean>(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState<boolean>(false);
+  const [isStorageModalOpen, setIsStorageModalOpen] = useState<boolean>(false);
+  const [storageModalDefaultTab, setStorageModalDefaultTab] = useState<"exams" | "guides">("exams");
+  const [loadedGuideData, setLoadedGuideData] = useState<any>(null);
 
   const savedInitialConfig = (() => {
     try {
@@ -141,11 +152,29 @@ export default function App() {
 
   // Manual Scope Configuration State
   const [scopeConfig, setScopeConfig] = useState<ScopeConfigData>(() => {
-    if (savedInitialConfig?.scopeConfig) {
-      return savedInitialConfig.scopeConfig;
+    const initSubject = savedInitialConfig?.subject || "Tin học";
+    const initGrade = savedInitialConfig?.grade || "6";
+    const initPeriod = savedInitialConfig?.period || "Giữa học kỳ I";
+    if (
+      savedInitialConfig?.scopeConfig &&
+      isScopeMatchingSelection(savedInitialConfig.scopeConfig, initSubject, initGrade, initPeriod)
+    ) {
+      return {
+        ...savedInitialConfig.scopeConfig,
+        subject: initSubject,
+        grade: initGrade,
+        period: initPeriod,
+      };
     }
-    return getDefaultScopeForPeriod("Tin học", "6", "Giữa học kỳ I");
+    return getMatchingScopeForSelection(initSubject, initGrade, initPeriod);
   });
+
+  // Ensure scopeConfig always stays synchronized with subject, grade, and period
+  React.useEffect(() => {
+    if (!isScopeMatchingSelection(scopeConfig, subject, grade, period)) {
+      setScopeConfig(getMatchingScopeForSelection(subject, grade, period));
+    }
+  }, [subject, grade, period]);
   const [showScopeModal, setShowScopeModal] = useState<boolean>(false);
   
   // Multi-exam codes state
@@ -248,6 +277,7 @@ export default function App() {
     setCurrentUser(null);
     setUserApiKeys([]);
     localStorage.removeItem("khaothi_account_code");
+    localStorage.removeItem("khaothi_account_password");
     localStorage.removeItem("khaothi_account_name");
     localStorage.removeItem("khaothi_account_username");
     localStorage.removeItem("khaothi_account_display_name");
@@ -257,7 +287,7 @@ export default function App() {
 
   const executeProtectedDownload = async (actionName: string, downloadFn: () => void) => {
     const savedCode = localStorage.getItem("khaothi_account_code");
-    const savedName = localStorage.getItem("khaothi_account_name") || "";
+    const savedName = localStorage.getItem("khaothi_account_username") || localStorage.getItem("khaothi_account_name") || "";
     if (savedCode) {
       const devId = getDeviceId();
       try {
@@ -303,6 +333,28 @@ export default function App() {
     }
   };
 
+  const swapMcqQuestionOptionToTarget = (q: any, newAnswer: string) => {
+    const LETTERS = ["A", "B", "C", "D"];
+    const currLetter = String(q.correctAnswer || "A").trim().toUpperCase();
+    const targetLetter = String(newAnswer || "A").trim().toUpperCase();
+    const currIdx = LETTERS.indexOf(currLetter);
+    const targetIdx = LETTERS.indexOf(targetLetter);
+    if (currIdx === -1 || targetIdx === -1 || currIdx === targetIdx || !Array.isArray(q.options) || q.options.length !== 4) {
+      return { ...q, correctAnswer: targetLetter };
+    }
+    const bodies = q.options.map((opt: string, i: number) =>
+      String(opt || `Phương án ${LETTERS[i]}`).replace(/^[A-Da-d][\.\)\:\-]\s*/, "").trim()
+    );
+    const tmp = bodies[currIdx];
+    bodies[currIdx] = bodies[targetIdx];
+    bodies[targetIdx] = tmp;
+    return {
+      ...q,
+      options: bodies.map((b: string, i: number) => `${LETTERS[i]}. ${b}`),
+      correctAnswer: targetLetter
+    };
+  };
+
   // Sync answer handlers across the whole application
   const handleUpdateMcqAnswer = (questionId: number, newAnswer: string) => {
     setTestData((prev: any) => {
@@ -311,7 +363,7 @@ export default function App() {
         if (variant.code === activeVariantCode) {
           const updatedMcq = (variant.mcq || []).map((q: any) => {
             if (q.id === questionId) {
-              return { ...q, correctAnswer: newAnswer };
+              return swapMcqQuestionOptionToTarget(q, newAnswer);
             }
             return q;
           });
@@ -322,7 +374,7 @@ export default function App() {
 
       const updatedRootMcq = (prev.mcq || []).map((q: any) => {
         if (q.id === questionId && (activeVariantCode === prev.code || activeVariantCode === prev.examVariants?.[0]?.code)) {
-          return { ...q, correctAnswer: newAnswer };
+          return swapMcqQuestionOptionToTarget(q, newAnswer);
         }
         return q;
       });
@@ -528,6 +580,38 @@ export default function App() {
       if (file.size > 50 * 1024 * 1024) {
          setError(`File ${file.name} quá lớn. Vui lòng tải lên file nhỏ hơn 50MB.`);
          return;
+      }
+
+      // If teacher uploads an Excel PPCT file (.xlsx, .xls), automatically parse and apply lessons to scopeConfig
+      if (/\.(xlsx|xls)$/i.test(file.name)) {
+        parsePpctLessonsFromExcel(file)
+          .then((lessons) => {
+            if (lessons && lessons.length > 0) {
+              const isCuoiKyPeriod = period && period.includes("Cuối");
+              let firstHalfLessons = lessons;
+              let secondHalfLessons: typeof lessons = [];
+              if (isCuoiKyPeriod && lessons.length > 2) {
+                const splitIndex = Math.max(1, Math.floor(lessons.length / 2));
+                firstHalfLessons = lessons.slice(0, splitIndex);
+                secondHalfLessons = lessons.slice(splitIndex).map((item, idx) => ({
+                  ...item,
+                  id: `excel_h2_${Date.now()}_${idx}`,
+                }));
+              }
+              setScopeConfig({
+                mode: "custom",
+                subject,
+                grade,
+                period,
+                firstHalfLessons,
+                secondHalfLessons,
+                quickNoteText: `Trích xuất tự động từ file PPCT: ${file.name}`,
+                savedPpctName: file.name,
+              });
+              setIsConfigSaved(false);
+            }
+          })
+          .catch(() => {});
       }
 
       const reader = new FileReader();
@@ -832,6 +916,10 @@ export default function App() {
     setError("");
 
     const isMath = subject.toLowerCase().trim().includes("toán");
+    const existingVariantsList = (activeData.examVariants || testData?.examVariants || []).filter(
+      (v: any) => v && v.code !== codeToGen
+    );
+
     const basePayload = {
       subject,
       grade: grade || activeData.grade,
@@ -843,6 +931,7 @@ export default function App() {
       matrix: activeData.matrix,
       specification: activeData.specification,
       examCode: codeToGen,
+      referenceVariants: existingVariantsList,
       referenceFiles,
       userApiKeys,
       userCode: currentUser?.id
@@ -857,12 +946,12 @@ export default function App() {
           data = JSON.parse(text);
         } catch {
           if (text.includes("<!doctype html") || text.includes("<html")) {
-            throw new Error("Hệ thống máy chủ tạm thời bị ngắt kết nối. Vui lòng bấm thử lại.");
+            throw new Error("Máy chủ AI đang quá tải lượt tạo đề. Vui lòng bấm 'Thử lại' trong giây lát.");
           }
           if (text && text.length < 300 && !text.includes("{")) {
             throw new Error(text);
           }
-          throw new Error(`${defaultErrMsg}: Dữ liệu AI trả về không đúng định dạng.`);
+          throw new Error(`${defaultErrMsg}: Dữ liệu AI trả về chưa đúng cấu trúc. Vui lòng thử lại.`);
         }
 
         if (!res.ok || data?.error) {
@@ -879,44 +968,59 @@ export default function App() {
         return data;
       };
 
-      // TỐI ƯU TỐC ĐỘ: Biên soạn song song toàn bộ các phần (Part 1, 2, 3, 4) của Mã đề cùng lúc
-      setLoadingMessage(`Đang biên soạn song song toàn bộ các phần của Mã đề ${codeToGen}...`);
+      // Biên soạn từng phần của Mã đề và truyền ngữ cảnh đồng bộ thuật ngữ & đối chiếu mã đề song song
+      setLoadingMessage(`Đang biên soạn Mã đề ${codeToGen} (Phần 1: Trắc nghiệm)...`);
+      const res1 = await fetch("/api/generate-variant", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...basePayload, part: "part1" }),
+        signal: abortControllerRef.current?.signal,
+      });
+      const data1 = await parseSafeResponse(res1, `Lỗi tạo Phần 1 cho Mã đề ${codeToGen}`);
 
-      const [res1, res2, res3, res4] = await Promise.all([
-        fetch("/api/generate-variant", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...basePayload, part: "part1" }),
-          signal: abortControllerRef.current?.signal,
+      setLoadingMessage(`Đang biên soạn Mã đề ${codeToGen} (Phần 2: Đúng/Sai)...`);
+      const res2 = await fetch("/api/generate-variant", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...basePayload,
+          part: "part2",
+          existingMcq: data1.mcq || []
         }),
-        fetch("/api/generate-variant", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...basePayload, part: "part2" }),
-          signal: abortControllerRef.current?.signal,
-        }),
-        isMath
-          ? fetch("/api/generate-variant", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ ...basePayload, part: "part3" }),
-              signal: abortControllerRef.current?.signal,
-            })
-          : Promise.resolve(null),
-        fetch("/api/generate-variant", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...basePayload, part: "part4" }),
-          signal: abortControllerRef.current?.signal,
-        }),
-      ]);
+        signal: abortControllerRef.current?.signal,
+      });
+      const data2 = await parseSafeResponse(res2, `Lỗi tạo Phần 2 cho Mã đề ${codeToGen}`);
 
-      const [data1, data2, data3, data4] = await Promise.all([
-        parseSafeResponse(res1 as Response, `Lỗi tạo Phần 1 cho Mã đề ${codeToGen}`),
-        parseSafeResponse(res2 as Response, `Lỗi tạo Phần 2 cho Mã đề ${codeToGen}`),
-        res3 ? parseSafeResponse(res3 as Response, `Lỗi tạo Phần 3 cho Mã đề ${codeToGen}`) : Promise.resolve({ shortAnswer: [] }),
-        parseSafeResponse(res4 as Response, `Lỗi tạo Phần B cho Mã đề ${codeToGen}`),
-      ]);
+      let data3 = { shortAnswer: [] };
+      if (isMath) {
+        setLoadingMessage(`Đang biên soạn Mã đề ${codeToGen} (Phần 3: Trả lời ngắn)...`);
+        const res3 = await fetch("/api/generate-variant", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...basePayload,
+            part: "part3",
+            existingMcq: data1.mcq || [],
+            existingTf: data2.tf || []
+          }),
+          signal: abortControllerRef.current?.signal,
+        });
+        data3 = await parseSafeResponse(res3, `Lỗi tạo Phần 3 cho Mã đề ${codeToGen}`);
+      }
+
+      setLoadingMessage(`Đang biên soạn Mã đề ${codeToGen} (Phần B: Tự luận / Thực hành - Đồng bộ bài học theo Ma trận)...`);
+      const res4 = await fetch("/api/generate-variant", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...basePayload,
+          part: "part4",
+          existingMcq: data1.mcq || [],
+          existingTf: data2.tf || []
+        }),
+        signal: abortControllerRef.current?.signal,
+      });
+      const data4 = await parseSafeResponse(res4, `Lỗi tạo Phần B cho Mã đề ${codeToGen}`);
 
       const newVariant = {
         code: codeToGen,
@@ -926,6 +1030,12 @@ export default function App() {
         shortAnswer: data3.shortAnswer || [],
         applied: data4.applied || [],
       };
+
+      if (customBaseData && Array.isArray(customBaseData.examVariants)) {
+        const idx = customBaseData.examVariants.findIndex((v: any) => v.code === codeToGen);
+        if (idx >= 0) customBaseData.examVariants[idx] = newVariant;
+        else customBaseData.examVariants.push(newVariant);
+      }
 
       setTestData((prev: any) => {
         if (!prev) return prev;
@@ -963,8 +1073,11 @@ export default function App() {
     setIsSequentialGenerating(true);
     setError("");
 
-    const currentVariants = testData.examVariants || [];
-    const generatedCodes = new Set(currentVariants.map((v: any) => v.code));
+    const workingBaseData = {
+      ...testData,
+      examVariants: [...(testData.examVariants || [])]
+    };
+    const generatedCodes = new Set(workingBaseData.examVariants.map((v: any) => v.code));
     const pendingCodes = variantCodes.filter(c => !generatedCodes.has(c));
 
     if (pendingCodes.length === 0) {
@@ -973,18 +1086,18 @@ export default function App() {
     }
 
     for (let i = 0; i < pendingCodes.length; i++) {
-        if (abortControllerRef.current?.signal.aborted) {
-          break;
-        }
+      if (abortControllerRef.current?.signal.aborted) {
+        break;
+      }
       const code = pendingCodes[i];
       setSequentialProgress({ current: i + 1, total: pendingCodes.length, code });
-      const success = await handleGenerateSingleVariant(code);
+      const success = await handleGenerateSingleVariant(code, workingBaseData);
       if (!success) {
         // Stop on error so teacher can retry that specific code
         break;
       }
-      // Small pause between variants for smooth UI and stability
-      await new Promise(res => setTimeout(res, 600));
+      // Pause between variants for smooth UI and API quota stability
+      await new Promise(res => setTimeout(res, 1200));
     }
 
     setIsSequentialGenerating(false);
@@ -1119,6 +1232,126 @@ export default function App() {
     });
   };
 
+  const handleSaveExamRecord = async () => {
+    if (!testData || !testData.matrix) {
+      setError("Vui lòng tạo đề kiểm tra trước khi thực hiện lưu.");
+      return;
+    }
+    try {
+      const payload = {
+        title: testData.title || `ĐỀ KIỂM TRA MÔN ${subject.toUpperCase()} ${grade} - ${period.toUpperCase()}`,
+        subject,
+        grade,
+        period,
+        schoolName: schoolName.trim() || testData.schoolName || "TRƯỜNG THCS TÂN LOAN",
+        departmentName: departmentName.trim() || testData.departmentName || "XÃ HÀM YÊN",
+        examFormat,
+        schoolYear: schoolYear.trim() || testData.schoolYear || "2026 - 2027",
+        time: examTime.trim() || testData.time || "45 phút",
+        userCode: currentUser?.id,
+        userDisplayName: currentUser?.customerName,
+        matrix: testData.matrix,
+        specification: testData.specification,
+        examVariants: testData.examVariants || [],
+        code: activeVariantCode,
+        endContent: testData.endContent
+      };
+
+      const res = await fetch("/api/exams/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSaveToast(`✓ Đã lưu hồ sơ đề thi "${payload.title}" vào Kho Đã Lưu thành công!`);
+        setTimeout(() => setSaveToast(null), 4000);
+      } else {
+        setError(data.error || "Không thể lưu đề thi.");
+      }
+    } catch (err: any) {
+      setError("Lỗi khi lưu đề thi: " + (err?.message || ""));
+    }
+  };
+
+  const handleSaveStudyGuideRecord = async (guideData: any) => {
+    if (!guideData) return;
+    try {
+      const payload = {
+        title: guideData.title || `ĐỀ CƯƠNG ÔN TẬP KIỂM TRA ${period.toUpperCase()}`,
+        subject: guideData.subject || subject,
+        grade: String(guideData.grade || grade),
+        period: guideData.period || period,
+        schoolName: guideData.schoolName || schoolName,
+        departmentName: guideData.departmentName || departmentName,
+        schoolYear: guideData.schoolYear || schoolYear,
+        userCode: currentUser?.id,
+        userDisplayName: currentUser?.customerName,
+        topics: guideData.topics || [],
+        mcq: guideData.mcq || [],
+        tf: guideData.tf || [],
+        shortAnswer: guideData.shortAnswer || [],
+        applied: guideData.applied || []
+      };
+
+      const res = await fetch("/api/study-guides/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSaveToast(`✓ Đã lưu đề cương ôn tập vào Kho Đã Lưu thành công!`);
+        setTimeout(() => setSaveToast(null), 4000);
+      } else {
+        setError(data.error || "Không thể lưu đề cương.");
+      }
+    } catch (err: any) {
+      setError("Lỗi khi lưu đề cương: " + (err?.message || ""));
+    }
+  };
+
+  const handleLoadExam = (exam: any) => {
+    if (!exam) return;
+    if (exam.subject) setSubject(exam.subject);
+    if (exam.grade) setGrade(String(exam.grade));
+    if (exam.period) setPeriod(exam.period);
+    if (exam.schoolName) setSchoolName(exam.schoolName);
+    if (exam.departmentName) setDepartmentName(exam.departmentName);
+    if (exam.schoolYear) setSchoolYear(exam.schoolYear);
+    if (exam.time) setExamTime(exam.time);
+    if (exam.examFormat) setExamFormat(exam.examFormat);
+
+    const variants = exam.examVariants || [];
+    if (variants.length > 0) {
+      const codes = variants.map((v: any) => v.code);
+      setVariantCodes(codes);
+      setExamCount(codes.length);
+      setActiveVariantCode(exam.code || codes[0]);
+    }
+
+    setTestData(exam);
+    setIsConfigSaved(true);
+    setMainTab("generate");
+    setSaveToast(`✓ Đã tải hồ sơ đề thi "${exam.title}" từ Kho Đã Lưu!`);
+    setTimeout(() => setSaveToast(null), 4000);
+  };
+
+  const handleLoadStudyGuide = (guide: any) => {
+    if (!guide) return;
+    if (guide.subject) setSubject(guide.subject);
+    if (guide.grade) setGrade(String(guide.grade));
+    if (guide.period) setPeriod(guide.period);
+    if (guide.schoolName) setSchoolName(guide.schoolName);
+    if (guide.departmentName) setDepartmentName(guide.departmentName);
+    if (guide.schoolYear) setSchoolYear(guide.schoolYear);
+
+    setLoadedGuideData(guide);
+    setMainTab("study-guide");
+    setSaveToast(`✓ Đã tải đề cương ôn tập "${guide.title}" từ Kho Đã Lưu!`);
+    setTimeout(() => setSaveToast(null), 4000);
+  };
+
   // Helper to get active variant data
   const getActiveVariant = () => {
     if (!testData) return null;
@@ -1222,6 +1455,19 @@ export default function App() {
             >
               <BookOpen className="w-3.5 h-3.5 text-emerald-400" />
               <span>Đề cương ôn tập</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setStorageModalDefaultTab("exams");
+                setIsStorageModalOpen(true);
+              }}
+              className="flex items-center gap-1.5 px-3 sm:px-4 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer text-amber-300 bg-slate-800/90 hover:bg-slate-700 border border-amber-500/40"
+              title="Mở Kho Đề Thi & Đề Cương Đã Lưu"
+            >
+              <FolderArchive className="w-3.5 h-3.5 text-amber-400" />
+              <span>Kho Đã Lưu</span>
             </button>
 
             {isAdmin && (
@@ -1437,6 +1683,12 @@ export default function App() {
               teacherHeadName={teacherHeadName}
               creatorName={creatorName}
               onOpenApiKeyModal={() => setIsApiKeyModalOpen(true)}
+              onSaveStudyGuide={handleSaveStudyGuideRecord}
+              onOpenStorageModal={() => {
+                setStorageModalDefaultTab("guides");
+                setIsStorageModalOpen(true);
+              }}
+              loadedGuideData={loadedGuideData}
             />
           </div>
         ) : mainTab === "accounts" ? (
@@ -1496,9 +1748,27 @@ export default function App() {
             onCancelGeneration={cancelGeneration}
             currentUser={currentUser}
             onOpenLoginModal={() => setIsLoginModalOpen(true)}
+            onSwitchToStudyGuideTab={() => setMainTab("study-guide")}
+            onGenerateStudyGuide={handleGenerateStudyGuide}
+            isGeneratingStudyGuide={isGeneratingStudyGuide}
+            onSaveExamRecord={handleSaveExamRecord}
+            onOpenStorageModal={() => {
+              setStorageModalDefaultTab("exams");
+              setIsStorageModalOpen(true);
+            }}
             />
         )}
       </div>
+
+      {/* Saved Exam and Study Guide Storage Modal */}
+      <SavedStorageModal
+        isOpen={isStorageModalOpen}
+        onClose={() => setIsStorageModalOpen(false)}
+        currentUser={currentUser}
+        onLoadExam={handleLoadExam}
+        onLoadStudyGuide={handleLoadStudyGuide}
+        defaultTab={storageModalDefaultTab}
+      />
 
       {/* Question Edit & AI Regeneration Modal */}
       {editingQuestion?.isOpen && (

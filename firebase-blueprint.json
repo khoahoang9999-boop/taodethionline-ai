@@ -45,6 +45,52 @@
         "deletedAt": { "type": "string" }
       },
       "required": ["id", "deletedAt"]
+    },
+    "SavedExam": {
+      "title": "SavedExam",
+      "description": "Saved exam variants, matrix, and specification records",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "subject": { "type": "string" },
+        "grade": { "type": "string" },
+        "period": { "type": "string" },
+        "schoolName": { "type": "string" },
+        "examFormat": { "type": "string" },
+        "schoolYear": { "type": "string" },
+        "time": { "type": "string" },
+        "userCode": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "matrix": { "type": "array" },
+        "specification": { "type": "array" },
+        "examVariants": { "type": "array" },
+        "code": { "type": "string" }
+      },
+      "required": ["title", "subject", "grade", "period"]
+    },
+    "SavedStudyGuide": {
+      "title": "SavedStudyGuide",
+      "description": "Saved student study guides and revision outlines",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "subject": { "type": "string" },
+        "grade": { "type": "string" },
+        "period": { "type": "string" },
+        "schoolName": { "type": "string" },
+        "departmentName": { "type": "string" },
+        "schoolYear": { "type": "string" },
+        "userCode": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "topics": { "type": "array" },
+        "mcq": { "type": "array" },
+        "tf": { "type": "array" },
+        "shortAnswer": { "type": "array" },
+        "applied": { "type": "array" }
+      },
+      "required": ["title", "subject", "grade", "period"]
     }
   },
   "firestore": {
@@ -59,6 +105,14 @@
     "/deleted_accounts/{id}": {
       "schema": "DeletedAccount",
       "description": "Permanent tombstones for deleted accounts"
+    },
+    "/saved_exams/{id}": {
+      "schema": "SavedExam",
+      "description": "Saved exam records with matrix and spec"
+    },
+    "/saved_study_guides/{id}": {
+      "schema": "SavedStudyGuide",
+      "description": "Saved study guide records"
     }
   }
 }

@@ -21,7 +21,7 @@ import {
   PenTool,
   Image as ImageIcon
 } from "lucide-react";
-import { ScopeConfigData, getDefaultScopeForPeriod } from "./ScopeConfigModal";
+import { ScopeConfigData, getDefaultScopeForPeriod, getMatchingScopeForSelection } from "./ScopeConfigModal";
 
 interface ConfigTabProps {
   subject: string;
@@ -140,6 +140,9 @@ export default function ConfigTab({
       const nextConfig: ScopeConfigData = {
         ...prev,
         mode: "custom",
+        subject,
+        grade,
+        period,
         firstHalfLessons: halfGroup === "firstHalf" ? updateList(prev?.firstHalfLessons) : (prev?.firstHalfLessons || []),
         secondHalfLessons: halfGroup === "secondHalf" ? updateList(prev?.secondHalfLessons) : (prev?.secondHalfLessons || []),
       };
@@ -642,7 +645,7 @@ export default function ConfigTab({
                 onChange={(e) => {
                   const newSubject = e.target.value;
                   setSubject(newSubject);
-                  setScopeConfig(getDefaultScopeForPeriod(newSubject, grade, period));
+                  setScopeConfig(getMatchingScopeForSelection(newSubject, grade, period));
                   markDirty();
                 }}
                 className="w-full text-xs font-bold text-slate-800 border border-slate-300 rounded-lg px-2.5 py-2 bg-slate-50/60 focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none cursor-pointer"
@@ -662,9 +665,7 @@ export default function ConfigTab({
                 onChange={(e) => {
                   const newGrade = e.target.value;
                   setGrade(newGrade);
-                  if (scopeConfig?.mode === "default") {
-                    setScopeConfig(getDefaultScopeForPeriod(subject, newGrade, period));
-                  }
+                  setScopeConfig(getMatchingScopeForSelection(subject, newGrade, period));
                   markDirty();
                 }}
                 className="w-full text-xs font-bold text-slate-800 border border-slate-300 rounded-lg px-2.5 py-2 bg-slate-50/60 focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none cursor-pointer text-center"
@@ -686,9 +687,7 @@ export default function ConfigTab({
                 onChange={(e) => {
                   const newPeriod = e.target.value;
                   setPeriod(newPeriod);
-                  if (scopeConfig?.mode === "default") {
-                    setScopeConfig(getDefaultScopeForPeriod(subject, grade, newPeriod));
-                  }
+                  setScopeConfig(getMatchingScopeForSelection(subject, grade, newPeriod));
                   markDirty();
                 }}
                 className="w-full text-xs font-bold text-slate-800 border border-slate-300 rounded-lg px-2.5 py-2 bg-slate-50/60 focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none cursor-pointer truncate"

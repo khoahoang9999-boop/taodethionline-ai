@@ -138,24 +138,24 @@ export default function ExamPaperView({
       style={{ fontFamily: '"Times New Roman", Times, "Liberation Serif", serif' }}
     >
       {/* Header */}
-      <div className="flex justify-between items-start text-[14px] leading-tight pb-2 border-b border-black">
+      <div className="flex justify-between items-start text-[13pt] leading-tight pb-2 border-b border-black">
         <div className="text-center font-bold uppercase w-[42%]">
-          <p>{departmentName || "XÃ HÀM YÊN"}</p>
-          <p className="text-[14px]">{schoolName || "TRƯỜNG THCS TÂN LOAN"}</p>
+          <p className="text-[13pt]">{departmentName || "XÃ HÀM YÊN"}</p>
+          <p className="text-[13pt]">{schoolName || "TRƯỜNG THCS TÂN LOAN"}</p>
           <div className="w-24 h-[1px] bg-black mx-auto mt-1.5"></div>
-          <p className="text-[12px] font-normal normal-case italic mt-1">Đề chính thức</p>
+          <p className="text-[13pt] font-normal normal-case italic mt-1">Đề chính thức</p>
         </div>
         <div className="text-center font-bold uppercase w-[58%]">
-          <p className="text-[14px]">{title}</p>
-          <p>NĂM HỌC {schoolYear || "2026 - 2027"}</p>
-          <p className="normal-case font-normal italic text-[13px]">(Thời gian làm bài: {time} - Không kể thời gian giao đề)</p>
-          <p className="text-[13px] font-bold text-blue-900 mt-0.5">Mã đề thi: {examCode}</p>
+          <p className="text-[13pt]">{title}</p>
+          <p className="text-[13pt]">NĂM HỌC {schoolYear || "2026 - 2027"}</p>
+          <p className="normal-case font-normal italic text-[13pt]">(Thời gian làm bài: {time} - Không kể thời gian giao đề)</p>
+          <p className="text-[13pt] font-bold text-blue-900 mt-0.5">Mã đề thi: {examCode}</p>
           <div className="w-24 h-[1px] bg-black mx-auto mt-1.5"></div>
         </div>
       </div>
 
       {/* Candidate info box */}
-      <div className="text-[13px] border border-dashed border-gray-400 p-2.5 rounded flex justify-between items-center bg-slate-50/50">
+      <div className="text-[13pt] border border-dashed border-gray-400 p-2.5 rounded flex justify-between items-center bg-slate-50/50">
         <div>
           Họ và tên thí sinh: ............................................................................
         </div>
@@ -167,7 +167,7 @@ export default function ExamPaperView({
         </div>
       </div>
 
-      <div className="text-center font-bold text-[14px] uppercase tracking-wider text-black">
+      <div className="text-center font-bold text-[13pt] uppercase tracking-wider text-black">
         ĐỀ BÀI
       </div>
 

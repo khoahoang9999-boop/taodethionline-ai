@@ -179,8 +179,10 @@ export default function ApiKeyModal({
                   </span>
                 )}
               </h3>
-              <p className="text-[11px] text-slate-400">
-                Quản lý danh sách Key & Tự động chuyển đổi khi hết hạn mức (Auto Failover)
+              <p className="text-[11px] text-slate-400 flex items-center gap-1.5 flex-wrap">
+                <span>Model AI: <strong className="text-emerald-400 font-mono">gemini-3.5-flash-lite</strong></span>
+                <span>•</span>
+                <span>Tự động xoay vòng Key khi hết hạn mức</span>
               </p>
             </div>
           </div>
@@ -226,19 +228,12 @@ export default function ApiKeyModal({
             </div>
           )}
 
-          {/* Quick Profile Name Bar showing both Login Username and Display Name */}
+          {/* Quick Profile Name Bar */}
           {onOpenProfileModal && (
             <div className="bg-slate-100 border border-slate-200 rounded-xl p-3 flex items-center justify-between gap-3 text-xs">
-              <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 text-slate-700">
-                <div className="flex items-center gap-1.5">
-                  <User className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                  <span>Tên đăng nhập: <strong className="text-indigo-900">@{accountUsername || accountName || "user"}</strong></span>
-                </div>
-                <span className="hidden sm:inline text-slate-300">|</span>
-                <div className="flex items-center gap-1.5">
-                  <Edit3 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                  <span>Tên hiển thị: <strong className="text-slate-900">{accountName || "Chưa đặt tên"}</strong></span>
-                </div>
+              <div className="flex items-center gap-1.5 text-slate-700">
+                <User className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                <span>Tên đăng nhập: <strong className="text-indigo-900">{accountUsername || accountName || "user"}</strong></span>
               </div>
               <button
                 type="button"
@@ -249,21 +244,22 @@ export default function ApiKeyModal({
                 className="bg-white hover:bg-emerald-50 text-emerald-700 font-bold px-3 py-1.5 rounded-lg border border-emerald-300 text-[11px] flex items-center gap-1 shadow-2xs transition-all cursor-pointer shrink-0"
               >
                 <Edit3 className="w-3 h-3" />
-                <span>Sửa tên & Hồ sơ</span>
+                <span>Hồ sơ tài khoản</span>
               </button>
             </div>
           )}
 
           {/* Failover Feature Explanation Banner */}
-          <div className="bg-amber-50 border border-amber-200/80 rounded-xl p-3.5 flex gap-3 text-amber-900 text-xs leading-relaxed">
-            <Sparkles className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+          <div className="bg-emerald-50 border border-emerald-200/90 rounded-xl p-3.5 flex gap-3 text-emerald-950 text-xs leading-relaxed">
+            <Sparkles className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
             <div className="space-y-1">
-              <p className="font-bold text-amber-900 flex items-center gap-1.5">
-                Cơ chế tự động xoay vòng Key (Auto Failover):
+              <p className="font-bold text-emerald-900 flex items-center gap-1.5">
+                <span>Cấu hình AI:</span>
+                <span className="font-mono bg-emerald-200/70 text-emerald-900 px-2 py-0.5 rounded text-[11px]">gemini-3.5-flash-lite / gemini-3.1-flash-lite</span>
               </p>
-              <p className="text-amber-800">
-                Khi Key chính vượt quá hạn mức (Quota Limit / 429 / Resource Exhausted), hệ thống sẽ
-                <strong> lập tức chuyển sang Key tiếp theo</strong> trong danh sách mà không làm gián đoạn quá trình sinh đề thi.
+              <p className="text-emerald-800">
+                Hệ thống ưu tiên chạy trên model <strong>gemini-3.5-flash-lite</strong> (và tự động dự phòng <strong>gemini-3.1-flash-lite</strong>). Khi Key chính chạm giới hạn (Quota Limit 429), hệ thống sẽ
+                <strong> tự động chuyển ngay sang Key tiếp theo</strong> trong danh sách của Quý Thầy/Cô mà không làm gián đoạn việc tạo đề.
               </p>
             </div>
           </div>

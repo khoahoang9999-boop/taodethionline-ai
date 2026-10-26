@@ -22,6 +22,7 @@ import {
 import { saveAs } from "file-saver";
 import { parseAppliedQuestion, formatAnswerLines } from "./formatter";
 import { getMathStandardObjectives, enrichSpecificationItem } from "../data/mathObjectives";
+import { formatPeriodDisplayLower, syncSpecificationWithMatrix } from "../data/textbooks";
 import { svgToPngBuffer } from "./math-figures";
 import { normalizeMatrixPercentages } from "./matrixUtils";
 
@@ -357,12 +358,12 @@ function createOfficialHeaderTable(
   const leftChildren: any[] = [
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      children: [new TextRun({ text: deptText, font: COMMON_FONT, size: 20, bold: true })],
+      children: [new TextRun({ text: deptText, font: COMMON_FONT, size: BASE_SIZE, bold: true })],
       spacing: { before: 0, after: 40 }
     }),
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      children: [new TextRun({ text: schoolText, font: COMMON_FONT, size: 20, bold: true })],
+      children: [new TextRun({ text: schoolText, font: COMMON_FONT, size: BASE_SIZE, bold: true })],
       spacing: { before: 0, after: 80 }
     }),
   ];
@@ -371,7 +372,7 @@ function createOfficialHeaderTable(
     leftChildren.push(
       new Table({
         alignment: AlignmentType.CENTER,
-        width: { size: 1800, type: WidthType.DXA },
+        width: { size: 2200, type: WidthType.DXA },
         borders: {
           top: { style: BorderStyle.SINGLE, size: 12, color: "000000" },
           bottom: { style: BorderStyle.SINGLE, size: 12, color: "000000" },
@@ -387,7 +388,7 @@ function createOfficialHeaderTable(
                   new Paragraph({
                     alignment: AlignmentType.CENTER,
                     children: [
-                      new TextRun({ text: boxedLabel, font: COMMON_FONT, size: 18, bold: true })
+                      new TextRun({ text: boxedLabel, font: COMMON_FONT, size: BASE_SIZE, bold: true })
                     ]
                   })
                 ]
@@ -401,33 +402,41 @@ function createOfficialHeaderTable(
     leftChildren.push(
       new Paragraph({
         alignment: AlignmentType.CENTER,
-        children: [new TextRun({ text: "---------", font: COMMON_FONT, size: 18, bold: false })],
+        children: [new TextRun({ text: "---------", font: COMMON_FONT, size: BASE_SIZE, bold: false })],
       })
     );
   }
 
   // Right Cell children:
-  const rightChildren = [
+  const rightChildren: Paragraph[] = [
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      children: [new TextRun({ text: titleText.toUpperCase(), font: COMMON_FONT, size: 22, bold: true })],
+      children: [new TextRun({ text: titleText.toUpperCase(), font: COMMON_FONT, size: BASE_SIZE, bold: true })],
       spacing: { before: 0, after: 40 }
     }),
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      children: [new TextRun({ text: yearText, font: COMMON_FONT, size: 20, bold: true })],
+      children: [new TextRun({ text: yearText, font: COMMON_FONT, size: BASE_SIZE, bold: true })],
       spacing: { before: 0, after: 40 }
     }),
-    new Paragraph({
-      alignment: AlignmentType.CENTER,
-      children: [new TextRun({ text: subTitleLine3, font: COMMON_FONT, size: 18, bold: true })],
-      spacing: { before: 0, after: 40 }
-    }),
-    new Paragraph({
-      alignment: AlignmentType.CENTER,
-      children: [new TextRun({ text: timeText, font: COMMON_FONT, size: 18, italics: true, bold: false })],
-    })
   ];
+
+  if (subTitleLine3 && subTitleLine3.trim()) {
+    rightChildren.push(
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        children: [new TextRun({ text: subTitleLine3, font: COMMON_FONT, size: BASE_SIZE, bold: true })],
+        spacing: { before: 0, after: 40 }
+      })
+    );
+  }
+
+  rightChildren.push(
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      children: [new TextRun({ text: timeText, font: COMMON_FONT, size: BASE_SIZE, italics: true, bold: false })],
+    })
+  );
 
   return new Table({
     width: { size: 100, type: WidthType.PERCENTAGE },
@@ -579,14 +588,13 @@ function createSpecDescCell(s: SpecRow, isMath = false): TableCell {
     const cleanDesc = desc.trim();
     const lines = cleanDesc.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
     
-    // Section Header (Nhận biết:, Thông hiểu:, Vận dụng:)
+    // Section Header (Nhận biết, Thông hiểu, Vận dụng)
     children.push(new Paragraph({
       spacing: { before: children.length === 0 ? 30 : 60, after: 20 },
       children: [
         new TextRun({ 
-          text: `${title}:`, 
+          text: title, 
           bold: true, 
-          italics: true, 
           font: COMMON_FONT, 
           size: TABLE_SIZE 
         })
@@ -595,9 +603,13 @@ function createSpecDescCell(s: SpecRow, isMath = false): TableCell {
 
     // Bullet lines
     lines.forEach(line => {
-      const bulletText = line.startsWith("–") || line.startsWith("-") || line.startsWith("+") 
-        ? line 
-        : `– ${line}`;
+      const bulletText =
+        line.startsWith("–") ||
+        line.startsWith("-") ||
+        line.startsWith("+") ||
+        line.endsWith(":")
+          ? line
+          : `– ${line}`;
       children.push(new Paragraph({
         spacing: { before: 15, after: 15 },
         children: [
@@ -618,7 +630,7 @@ function createSpecDescCell(s: SpecRow, isMath = false): TableCell {
 
   return new TableCell({
     children: children.length ? children : [new Paragraph({ text: "" })],
-    verticalAlign: VerticalAlign.CENTER,
+    verticalAlign: VerticalAlign.TOP,
   });
 }
 
@@ -1268,7 +1280,7 @@ export async function generateDocx(data: TestData, specificVariantCode?: string)
         }),
         new Paragraph({
           alignment: AlignmentType.JUSTIFIED,
-          indent: { left: 720, firstLine: 360 },
+          indent: { firstLine: 720 },
           children: [
             new TextRun({ text: "+ Số học: ", font: COMMON_FONT, size: BASE_SIZE, bold: true }),
             new TextRun({ text: mathObj.knowledge.arithmetic, font: COMMON_FONT, size: BASE_SIZE, bold: false }),
@@ -1277,7 +1289,7 @@ export async function generateDocx(data: TestData, specificVariantCode?: string)
         }),
         new Paragraph({
           alignment: AlignmentType.JUSTIFIED,
-          indent: { left: 720, firstLine: 360 },
+          indent: { firstLine: 720 },
           children: [
             new TextRun({ text: "+ Hình học: ", font: COMMON_FONT, size: BASE_SIZE, bold: true }),
             new TextRun({ text: mathObj.knowledge.geometry, font: COMMON_FONT, size: BASE_SIZE, bold: false }),
@@ -1290,7 +1302,7 @@ export async function generateDocx(data: TestData, specificVariantCode?: string)
         mathChildren.push(
           new Paragraph({
             alignment: AlignmentType.JUSTIFIED,
-            indent: { left: 720, firstLine: 360 },
+            indent: { firstLine: 720 },
             children: [
               new TextRun({ text: "+ Thống kê và Xác suất: ", font: COMMON_FONT, size: BASE_SIZE, bold: true }),
               new TextRun({ text: mathObj.knowledge.statistics, font: COMMON_FONT, size: BASE_SIZE, bold: false }),
@@ -1316,7 +1328,7 @@ export async function generateDocx(data: TestData, specificVariantCode?: string)
         mathChildren.push(
           new Paragraph({
             alignment: AlignmentType.JUSTIFIED,
-            indent: { left: 720, firstLine: 360 },
+            indent: { firstLine: 720 },
             children: [
               new TextRun({ text: `– ${comp}`, font: COMMON_FONT, size: BASE_SIZE, bold: false }),
             ],
@@ -1330,13 +1342,13 @@ export async function generateDocx(data: TestData, specificVariantCode?: string)
           alignment: AlignmentType.JUSTIFIED,
           indent: { firstLine: 720 },
           children: [
-            new TextRun({ text: "3 Về phẩm chất:", font: COMMON_FONT, size: BASE_SIZE, bold: true }),
+            new TextRun({ text: "3. Về phẩm chất:", font: COMMON_FONT, size: BASE_SIZE, bold: true }),
           ],
           spacing: PARAGRAPH_SPACING,
         }),
         ...mathObj.qualities.map(q => new Paragraph({
           alignment: AlignmentType.JUSTIFIED,
-          indent: { left: 720, firstLine: 360 },
+          indent: { firstLine: 720 },
           children: [
             new TextRun({ text: `+ ${q}`, font: COMMON_FONT, size: BASE_SIZE, bold: false }),
           ],
@@ -1358,7 +1370,7 @@ export async function generateDocx(data: TestData, specificVariantCode?: string)
           alignment: AlignmentType.JUSTIFIED,
           indent: { firstLine: 720 },
           children: [
-            new TextRun({ text: `- Thời điểm kiểm tra: Kiểm tra ${(data.period || "giữa học kì I").toLowerCase()}${(data.period || "").toLowerCase().includes("giữa") ? `, khi kết thúc nội dung: ${resolvedEndContent}` : "."}`, font: COMMON_FONT, size: BASE_SIZE }),
+            new TextRun({ text: `- Thời điểm kiểm tra: Kiểm tra ${formatPeriodDisplayLower(data.period)}${(data.period || "").toLowerCase().includes("giữa") ? `, khi kết thúc nội dung: ${resolvedEndContent}` : "."}`, font: COMMON_FONT, size: BASE_SIZE }),
           ],
           spacing: PARAGRAPH_SPACING,
         }),
@@ -1382,13 +1394,13 @@ export async function generateDocx(data: TestData, specificVariantCode?: string)
           alignment: AlignmentType.JUSTIFIED,
           indent: { firstLine: 720 },
           children: [
-            new TextRun({ text: "Cấu trúc:", font: COMMON_FONT, size: BASE_SIZE, bold: true }),
+            new TextRun({ text: "* Cấu trúc:", font: COMMON_FONT, size: BASE_SIZE, bold: true }),
           ],
           spacing: PARAGRAPH_SPACING,
         }),
         new Paragraph({
           alignment: AlignmentType.JUSTIFIED,
-          indent: { left: 720, firstLine: 360 },
+          indent: { firstLine: 720 },
           children: [
             new TextRun({ text: "- Mức độ đề: 40% Nhận biết; 30% Thông hiểu; 30% Vận dụng.", font: COMMON_FONT, size: BASE_SIZE }),
           ],
@@ -1396,17 +1408,17 @@ export async function generateDocx(data: TestData, specificVariantCode?: string)
         }),
         new Paragraph({
           alignment: AlignmentType.JUSTIFIED,
-          indent: { left: 720, firstLine: 360 },
+          indent: { firstLine: 720 },
           children: [
-            new TextRun({ text: "- Phần trắc nghiệm 4 lựa chọn: 3,0 điểm (12 câu); Trắc nghiệm Đúng - Sai: 2,0 điểm (02 câu); Trả lời ngắn: 2,0 điểm (04 câu)", font: COMMON_FONT, size: BASE_SIZE }),
+            new TextRun({ text: "- Phần trắc nghiệm 4 lựa chọn: 3,0 điểm (12 câu); Trắc nghiệm Đúng - Sai: 2,0 điểm (02 câu); Trả lời ngắn: 2,0 điểm (04 câu).", font: COMMON_FONT, size: BASE_SIZE }),
           ],
           spacing: PARAGRAPH_SPACING,
         }),
         new Paragraph({
           alignment: AlignmentType.JUSTIFIED,
-          indent: { left: 720, firstLine: 360 },
+          indent: { firstLine: 720 },
           children: [
-            new TextRun({ text: "- Phần tự luận: 3,0 điểm (Vận dụng: 2,0 điểm; Thông hiểu: 1 điểm)", font: COMMON_FONT, size: BASE_SIZE }),
+            new TextRun({ text: "- Phần tự luận: 3,0 điểm (Vận dụng: 2,0 điểm; Thông hiểu: 1 điểm).", font: COMMON_FONT, size: BASE_SIZE }),
           ],
           spacing: PARAGRAPH_SPACING,
         }),
@@ -1466,7 +1478,7 @@ export async function generateDocx(data: TestData, specificVariantCode?: string)
             alignment: AlignmentType.JUSTIFIED,
             indent: { firstLine: 720 },
             children: [
-              new TextRun({ text: `- Thời điểm kiểm tra: Kiểm tra ${(data.period || "giữa học kì I").toLowerCase()}, khi kết thúc nội dung: ${resolvedEndContent}`, font: COMMON_FONT, size: BASE_SIZE }),
+              new TextRun({ text: `- Thời điểm kiểm tra: Kiểm tra ${formatPeriodDisplayLower(data.period)}, khi kết thúc nội dung: ${resolvedEndContent}`, font: COMMON_FONT, size: BASE_SIZE }),
             ],
             spacing: PARAGRAPH_SPACING,
           }),
@@ -1488,7 +1500,7 @@ export async function generateDocx(data: TestData, specificVariantCode?: string)
           }),
           new Paragraph({
             alignment: AlignmentType.JUSTIFIED,
-            indent: { left: 720, firstLine: 360 },
+            indent: { firstLine: 720 },
             children: [
               new TextRun({ text: `- Mức độ đề: 40% Nhận biết (16 câu/lệnh hỏi); 30% Thông hiểu (12 câu/lệnh hỏi); 30% Vận dụng (03 câu).`, font: COMMON_FONT, size: BASE_SIZE }),
             ],
@@ -1496,15 +1508,15 @@ export async function generateDocx(data: TestData, specificVariantCode?: string)
           }),
           new Paragraph({
             alignment: AlignmentType.JUSTIFIED,
-            indent: { left: 720, firstLine: 360 },
+            indent: { firstLine: 720 },
             children: [
-              new TextRun({ text: `- Phần trắc nghiệm 4 lựa chọn: 3,0 điểm (12 câu - gồm 8 câu Nhận biết, 4 câu Thông hiểu); Trắc nghiệm Đúng - Sai: 4,0 điểm (04 câu - 16 lệnh hỏi gồm 8 ý Nhận biết, 8 ý Thông hiểu)`, font: COMMON_FONT, size: BASE_SIZE }),
+              new TextRun({ text: `- Phần trắc nghiệm 4 lựa chọn: 3,0 điểm (12 câu - gồm 8 câu Nhận biết, 4 câu Thông hiểu); Trắc nghiệm Đúng - Sai: 4,0 điểm (04 câu - 16 lệnh hỏi gồm 8 ý Nhận biết, 8 ý Thông hiểu).`, font: COMMON_FONT, size: BASE_SIZE }),
             ],
             spacing: PARAGRAPH_SPACING,
           }),
           new Paragraph({
             alignment: AlignmentType.JUSTIFIED,
-            indent: { left: 720, firstLine: 360 },
+            indent: { firstLine: 720 },
             children: [
               new TextRun({ text: appliedLine, font: COMMON_FONT, size: BASE_SIZE }),
             ],
@@ -1523,12 +1535,22 @@ export async function generateDocx(data: TestData, specificVariantCode?: string)
   }
 
   // 2. Specification Section (LANDSCAPE)
-  if (data.specification && data.specification.length > 0) {
-    const specList = data.specification;
+  const resolvedSpecList: SpecRow[] = syncSpecificationWithMatrix(
+    data.specification,
+    data.matrix,
+    data.subject,
+    data.grade,
+    data.period
+  );
 
-    // Calculate rowSpan for topic column
+  if (resolvedSpecList && resolvedSpecList.length > 0) {
+    const specList = resolvedSpecList;
+
+    // Calculate rowSpan and topic sequence number (TT) for topic column
     const topicSpans: number[] = new Array(specList.length).fill(1);
+    const topicSeqNumbers: number[] = new Array(specList.length).fill(1);
     let topicIdx = 0;
+    let currentSeq = 1;
     while (topicIdx < specList.length) {
       let count = 1;
       const currentTopic = (specList[topicIdx].topic || "").trim();
@@ -1540,9 +1562,12 @@ export async function generateDocx(data: TestData, specificVariantCode?: string)
         count++;
       }
       topicSpans[topicIdx] = count;
+      topicSeqNumbers[topicIdx] = currentSeq;
       for (let j = 1; j < count; j++) {
         topicSpans[topicIdx + j] = 0;
+        topicSeqNumbers[topicIdx + j] = currentSeq;
       }
+      currentSeq++;
       topicIdx += count;
     }
 
@@ -1565,16 +1590,53 @@ export async function generateDocx(data: TestData, specificVariantCode?: string)
       }),
       ...specList.map((s, idx) => {
         const span = topicSpans[idx];
-        const rowCells: TableCell[] = [
-          createCell(String(idx + 1)),
-        ];
+        const topicSeq = topicSeqNumbers[idx];
+        const rowCells: TableCell[] = [];
 
         if (span > 0) {
-          rowCells.push(createCell(s.topic || "", 1, span, true, AlignmentType.LEFT));
+          rowCells.push(
+            new TableCell({
+              columnSpan: 1,
+              rowSpan: span,
+              verticalAlign: VerticalAlign.TOP,
+              children: [
+                new Paragraph({
+                  alignment: AlignmentType.CENTER,
+                  children: [new TextRun({ text: String(topicSeq), font: COMMON_FONT, size: TABLE_SIZE, bold: true })],
+                  spacing: { before: 60, after: 60 }
+                })
+              ]
+            })
+          );
+          rowCells.push(
+            new TableCell({
+              columnSpan: 1,
+              rowSpan: span,
+              verticalAlign: VerticalAlign.TOP,
+              children: [
+                new Paragraph({
+                  alignment: AlignmentType.LEFT,
+                  children: [new TextRun({ text: s.topic || "", font: COMMON_FONT, size: TABLE_SIZE, bold: true })],
+                  spacing: { before: 60, after: 60 }
+                })
+              ]
+            })
+          );
         }
 
         rowCells.push(
-          createCell(s.content || "", 1, 1, false, AlignmentType.LEFT),
+          new TableCell({
+            columnSpan: 1,
+            rowSpan: 1,
+            verticalAlign: VerticalAlign.TOP,
+            children: [
+              new Paragraph({
+                alignment: AlignmentType.LEFT,
+                children: [new TextRun({ text: s.content || "", font: COMMON_FONT, size: TABLE_SIZE, bold: false })],
+                spacing: { before: 60, after: 60 }
+              })
+            ]
+          }),
           createSpecDescCell(s, isMath),
           createCell(formatDocxCount(s.nb_count)),
           createCell(formatDocxCount(s.th_count)),
@@ -1585,11 +1647,11 @@ export async function generateDocx(data: TestData, specificVariantCode?: string)
       }),
       new TableRow({
         children: [
-          createCell("Tổng số câu", 3, 1, true),
+          createCell("Số lệnh hỏi TN/Số câu tự luận", 3, 1, true),
           createCell("", 1, 1, false),
           createCell(specList.reduce((sum, r) => sum + (Number(r.nb_count) || 0), 0) ? `${specList.reduce((sum, r) => sum + (Number(r.nb_count) || 0), 0)}TN` : (isMath ? "17TN" : "16TN"), 1, 1, true),
           createCell(specList.reduce((sum, r) => sum + (Number(r.th_count) || 0), 0) ? `${specList.reduce((sum, r) => sum + (Number(r.th_count) || 0), 0)} TN` : (isMath ? "5 TN" : "12 TN"), 1, 1, true),
-          createCell(isMath ? "3 TL" : (isPractice ? "3 TH" : (data.examFormat || "").toLowerCase().includes("tự luận") ? "3 TL" : "2 TL, 1 TH"), 1, 1, true),
+          createCell(isMath ? "3 TL" : (isPractice ? "3TH" : "3TL"), 1, 1, true),
         ]
       }),
       new TableRow({
@@ -2121,7 +2183,7 @@ export async function generateDocx(data: TestData, specificVariantCode?: string)
           size: {
             orientation: PageOrientation.PORTRAIT,
           },
-          margin: { top: "2.0cm", bottom: "2.0cm", left: "3.0cm", right: "2.0cm" },
+          margin: { top: "1.5cm", bottom: "1.5cm", left: "2.0cm", right: "1.5cm" },
         },
       },
       children: examChildren
@@ -2277,7 +2339,7 @@ export async function generateDocx(data: TestData, specificVariantCode?: string)
           size: {
             orientation: PageOrientation.PORTRAIT,
           },
-          margin: { top: "2.0cm", bottom: "2.0cm", left: "3.0cm", right: "2.0cm" },
+          margin: { top: "1.5cm", bottom: "1.5cm", left: "2.0cm", right: "1.5cm" },
         },
       },
       children: answerKeyChildren

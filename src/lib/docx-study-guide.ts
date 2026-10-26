@@ -17,8 +17,8 @@ import { svgToPngBuffer } from "./math-figures";
 import { formatAnswerLines } from "./formatter";
 
 const COMMON_FONT = "Times New Roman";
-const BASE_SIZE = 28; // 14pt
-const TITLE_SIZE = 28; // 14pt
+const BASE_SIZE = 26; // 13pt
+const TITLE_SIZE = 26; // 13pt
 const PARAGRAPH_SPACING = { before: 0, after: 60, line: 276 };
 
 
@@ -267,11 +267,11 @@ export async function exportStudyGuideToWord(data: StudyGuideData) {
             children: [
               new Paragraph({
                 alignment: AlignmentType.CENTER,
-                children: [new TextRun({ text: dept, font: COMMON_FONT, size: 22, bold: true })],
+                children: [new TextRun({ text: dept, font: COMMON_FONT, size: BASE_SIZE, bold: true })],
               }),
               new Paragraph({
                 alignment: AlignmentType.CENTER,
-                children: [new TextRun({ text: school, font: COMMON_FONT, size: 22, bold: true })],
+                children: [new TextRun({ text: school, font: COMMON_FONT, size: BASE_SIZE, bold: true })],
               }),
             ],
           }),
@@ -280,11 +280,11 @@ export async function exportStudyGuideToWord(data: StudyGuideData) {
             children: [
               new Paragraph({
                 alignment: AlignmentType.CENTER,
-                children: [new TextRun({ text: "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM", font: COMMON_FONT, size: 22, bold: true })],
+                children: [new TextRun({ text: "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM", font: COMMON_FONT, size: BASE_SIZE, bold: true })],
               }),
               new Paragraph({
                 alignment: AlignmentType.CENTER,
-                children: [new TextRun({ text: "Độc lập - Tự do - Hạnh phúc", font: COMMON_FONT, size: 22, bold: true, underline: {} })],
+                children: [new TextRun({ text: "Độc lập - Tự do - Hạnh phúc", font: COMMON_FONT, size: BASE_SIZE, bold: true, underline: {} })],
               }),
             ],
           }),

@@ -192,8 +192,8 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
 
   const handleOpenEditAccount = (acc: AccountData) => {
     setEditingAccount(acc);
-    setEditUsername(acc.username || "");
-    setEditCustomerName(acc.customerName || "");
+    setEditUsername(acc.username || acc.customerName || "");
+    setEditCustomerName(acc.customerName || acc.username || "");
     setEditPhone(acc.phone || "");
     setEditNotes(acc.notes || "");
     setEditMaxDevices(acc.maxDevices || 2);
@@ -204,16 +204,17 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
   const handleSaveAccountEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingAccount) return;
-    if (!editCustomerName.trim()) {
-      showToast("Tên hiển thị / Họ tên giáo viên không được để trống.");
+    const cleanName = editUsername.trim() || editCustomerName.trim();
+    if (!cleanName) {
+      showToast("Tên đăng nhập không được để trống.");
       return;
     }
 
     setIsUpdatingAccount(true);
     try {
       const result = await clientAdminUpdateAccount(adminPin, editingAccount.id, {
-        username: editUsername.trim() || undefined,
-        customerName: editCustomerName.trim(),
+        username: cleanName,
+        customerName: cleanName,
         phone: editPhone.trim(),
         notes: editNotes.trim(),
         maxDevices: Number(editMaxDevices) || 2,
@@ -222,7 +223,7 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
       });
 
       if (result && result.success) {
-        showToast(`Đã cập nhật tài khoản "${editCustomerName}" thành công!`);
+        showToast(`Đã cập nhật tài khoản "${cleanName}" thành công!`);
         setEditingAccount(null);
         fetchAccounts(adminPin);
       } else {
@@ -294,29 +295,31 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
 
   const handleCreateAccount = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newCustomerName.trim()) {
-      showToast("Vui lòng nhập Tên hiển thị (Họ và tên giáo viên).");
+    const loginName = (newUsername.trim() || newCustomerName.trim()).trim();
+    if (!loginName) {
+      showToast("Vui lòng nhập Tên đăng nhập.");
       return;
     }
 
-    const usernameToSet = (newUsername.trim() || newCustomerName.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").replace(/[^a-z0-9]/g, "")).trim();
     const passwordToSet = newCode.trim() || "123456";
 
-    // Check duplicate username if specified
-    if (newUsername.trim()) {
-      const normInput = newUsername.trim().toLowerCase();
-      const isDuplicateUser = accounts.some((a) => (a.username || "").toLowerCase().trim() === normInput);
-      if (isDuplicateUser) {
-        showToast(`Tên đăng nhập "${newUsername.trim()}" đã tồn tại. Vui lòng chọn Tên đăng nhập khác.`);
-        return;
-      }
+    // Check duplicate username
+    const normInput = loginName.toLowerCase();
+    const isDuplicateUser = accounts.some(
+      (a) =>
+        (a.username || "").toLowerCase().trim() === normInput ||
+        (a.customerName || "").toLowerCase().trim() === normInput
+    );
+    if (isDuplicateUser) {
+      showToast(`Tên đăng nhập "${loginName}" đã tồn tại. Vui lòng chọn Tên đăng nhập khác.`);
+      return;
     }
 
     setIsCreating(true);
     try {
       const result = await clientAdminCreateAccount(adminPin, {
-        username: usernameToSet,
-        customerName: newCustomerName.trim(),
+        username: loginName,
+        customerName: loginName,
         password: passwordToSet,
         phone: newPhone.trim(),
         expiryDate: newExpiryDate,
@@ -325,7 +328,7 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
       });
 
       if (result.success && result.account) {
-        showToast(`✓ Đã tạo thành công tài khoản cho "${result.account.customerName}" (Tên đăng nhập: ${result.account.username || usernameToSet}, Mật khẩu: ${passwordToSet})`);
+        showToast(`✓ Đã tạo tài khoản thành công (Tên đăng nhập: ${loginName}, Mật khẩu: ${passwordToSet})`);
         setNewCode("");
         setNewUsername("");
         setNewCustomerName("");
@@ -401,11 +404,11 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
   const handleCopyZaloNotice = (acc: AccountData) => {
     const pass = acc.password || acc.id;
     const user = acc.username || acc.customerName;
-    const text = `THÔNG BÁO CẤP TÀI KHOẢN KHẢO THÍ GDPT 2018\n--------------------------------------------\nKính gửi: ${acc.customerName}\n• Tên hiển thị: ${acc.customerName}\n• Tên đăng nhập: ${user}\n• Mật khẩu: ${pass}\n• Hạn sử dụng: ${formatDateVN(acc.expiryDate)}\n• Số thiết bị tối đa: ${acc.maxDevices} máy\n--------------------------------------------\nĐịa chỉ ứng dụng: https://taodethionline-ai.vercel.app/`;
+    const text = `THÔNG BÁO CẤP TÀI KHOẢN KHẢO THÍ GDPT 2018\n--------------------------------------------\n• Tên đăng nhập: ${user}\n• Mật khẩu: ${pass}\n• Hạn sử dụng: ${formatDateVN(acc.expiryDate)}\n• Số thiết bị tối đa: ${acc.maxDevices} máy\n--------------------------------------------\nĐịa chỉ ứng dụng: https://taodethionline-ai.vercel.app/`;
 
     navigator.clipboard.writeText(text);
     setCopiedCode(acc.id);
-    showToast(`Đã sao chép tin nhắn cấp tài khoản cho ${acc.customerName}`);
+    showToast(`Đã sao chép tin nhắn cấp tài khoản cho ${user}`);
     setTimeout(() => setCopiedCode(null), 3000);
   };
 
@@ -609,41 +612,28 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
 
           <form onSubmit={handleCreateAccount} className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {/* Username (Tên đăng nhập riêng) */}
+              {/* Username (Tên đăng nhập) */}
               <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
-                  <span>1. Tên đăng nhập:</span>
-                  <span className="text-[10.5px] text-slate-400 font-normal">Dùng để đăng nhập vào app</span>
-                </label>
-                <input
-                  type="text"
-                  value={newUsername}
-                  onChange={(e) => setNewUsername(e.target.value)}
-                  placeholder="VD: cothao_tinhoc, nguyenvana, letrinh..."
-                  className="w-full text-xs font-bold text-indigo-900 border border-slate-300 rounded-xl px-3 py-2 bg-indigo-50/30 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
-                />
-              </div>
-
-              {/* Display Name (Tên hiển thị riêng) */}
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
-                  <span>2. Tên hiển thị / Họ tên giáo viên (*):</span>
-                  <span className="text-[10.5px] text-blue-600 font-medium">Hiện trên trang & chữ ký</span>
+                <label className="text-xs font-bold text-slate-700">
+                  1. Tên đăng nhập (*):
                 </label>
                 <input
                   type="text"
                   required
-                  value={newCustomerName}
-                  onChange={(e) => setNewCustomerName(e.target.value)}
-                  placeholder="VD: Cô Nguyễn Thị Phương Thảo hoặc Thầy Hoàng Văn Đình Khoa"
-                  className="w-full text-xs font-semibold text-slate-800 border border-slate-300 rounded-xl px-3 py-2 bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                  value={newUsername}
+                  onChange={(e) => {
+                    setNewUsername(e.target.value);
+                    setNewCustomerName(e.target.value);
+                  }}
+                  placeholder="Nhập tên đăng nhập..."
+                  className="w-full text-xs font-bold text-slate-800 border border-slate-300 rounded-xl px-3 py-2 bg-white focus:ring-2 focus:ring-blue-500 outline-none"
                 />
               </div>
 
               {/* Account Password */}
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-slate-700">3. Mật khẩu đăng nhập (*):</label>
+                  <label className="text-xs font-bold text-slate-700">2. Mật khẩu đăng nhập (*):</label>
                   <button
                     type="button"
                     onClick={handleGenerateRandomCode}
@@ -873,34 +863,29 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
                         </div>
                       </td>
 
-                      {/* Customer Name, Avatar & Phone */}
+                      {/* Username, Avatar & Phone */}
                       <td className="py-3 px-3">
                         <div className="flex items-center gap-2.5">
                           <div className="w-8 h-8 rounded-full overflow-hidden border border-slate-200 bg-slate-100 shrink-0 shadow-xs">
                             <img
-                              src={acc.avatar || `https://api.dicebear.com/7.x/lorelei/svg?seed=${encodeURIComponent(acc.id || acc.customerName)}&backgroundColor=c0aede,b6e3f4,ffdfbf`}
-                              alt={acc.customerName}
+                              src={acc.avatar || `https://api.dicebear.com/7.x/lorelei/svg?seed=${encodeURIComponent(acc.id || acc.username || acc.customerName)}&backgroundColor=c0aede,b6e3f4,ffdfbf`}
+                              alt={acc.username || acc.customerName}
                               className="w-full h-full object-cover"
                             />
                           </div>
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-1.5 group">
-                              <div className="font-bold text-slate-800 truncate">{acc.customerName}</div>
+                              <div className="font-bold text-slate-800 truncate">{acc.username || acc.customerName}</div>
                               <button
                                 type="button"
                                 onClick={() => handleOpenEditAccount(acc)}
                                 className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-all cursor-pointer"
-                                title="Chỉnh sửa tên hiển thị / Tên đăng nhập / Avatar"
+                                title="Chỉnh sửa tên đăng nhập / Avatar"
                               >
                                 <Pencil className="w-3.5 h-3.5 text-blue-600" />
                               </button>
                             </div>
                             <div className="text-[11px] text-slate-500 flex items-center gap-2 flex-wrap">
-                              {acc.username && (
-                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 font-semibold border border-indigo-100 text-[10.5px]">
-                                  Đăng nhập: @{acc.username}
-                                </span>
-                              )}
                               <span className="flex items-center gap-1 text-slate-400">
                                 <Phone className="w-3 h-3 text-slate-400" />
                                 <span>{acc.phone || "Chưa nhập SĐT"}</span>
@@ -1456,32 +1441,19 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
 
               {/* Username (Tên đăng nhập) */}
               <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-slate-700 flex items-center justify-between">
-                  <span>Tên đăng nhập:</span>
-                  <span className="text-[11px] text-slate-500 font-medium">Tên dùng đăng nhập</span>
-                </label>
-                <input
-                  type="text"
-                  value={editUsername}
-                  onChange={(e) => setEditUsername(e.target.value)}
-                  placeholder="Nhập tên đăng nhập..."
-                  className="w-full px-3.5 py-2 bg-slate-50 focus:bg-white border border-slate-300 rounded-xl text-xs font-bold text-indigo-900 focus:ring-2 focus:ring-indigo-500 outline-none"
-                />
-              </div>
-
-              {/* Customer Name (Tên hiển thị) */}
-              <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-slate-700 flex items-center justify-between">
-                  <span>Tên hiển thị / Họ tên giáo viên (*):</span>
-                  <span className="text-[11px] text-blue-600 font-medium">Thay đổi tùy ý</span>
+                <label className="block text-xs font-bold text-slate-700">
+                  Tên đăng nhập (*):
                 </label>
                 <input
                   type="text"
                   required
-                  value={editCustomerName}
-                  onChange={(e) => setEditCustomerName(e.target.value)}
-                  placeholder="Nhập họ tên giáo viên hoặc trường học..."
-                  className="w-full px-3.5 py-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-800 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                  value={editUsername}
+                  onChange={(e) => {
+                    setEditUsername(e.target.value);
+                    setEditCustomerName(e.target.value);
+                  }}
+                  placeholder="Nhập tên đăng nhập..."
+                  className="w-full px-3.5 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                 />
               </div>
 

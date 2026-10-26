@@ -1,6 +1,7 @@
 import React, { useMemo } from "react";
 import { getMathStandardObjectives } from "../data/mathObjectives";
 import { normalizeMatrixPercentages } from "../lib/matrixUtils";
+import { formatPeriodDisplayLower } from "../data/textbooks";
 
 interface MatrixRow {
   topic: string;
@@ -242,116 +243,104 @@ export default function MatrixView({
       {isMath ? (
         <>
           {/* Header Môn Toán */}
-          <div className="text-center font-bold text-[14px] leading-tight pb-3">
+          <div className="text-center font-bold text-[13pt] leading-tight pb-3">
             <p className="uppercase tracking-wide">KIỂM TRA {periodUpper} – NĂM HỌC {schoolYear || "2026-2027"}</p>
-            <p className="font-bold text-[13px] mt-0.5">Môn: Toán {grade}</p>
+            <p className="font-bold text-[13pt] mt-0.5">Môn: Toán {grade}</p>
           </div>
 
           {/* I. MỤC TIÊU */}
-          <div className="text-[14px] leading-relaxed text-black space-y-2 pt-1 border-b border-gray-200 pb-3">
-            <div className="font-bold text-[14px] uppercase tracking-wide text-black">
+          <div className="text-[13pt] leading-relaxed text-black space-y-1.5 pt-1 border-b border-gray-200 pb-3 text-justify">
+            <div className="font-bold text-[13pt] uppercase tracking-wide text-black text-left">
               I. MỤC TIÊU
             </div>
-            <div>
-              <p className="pl-6"><span className="font-bold">1. Về kiến thức:</span> {mathObjectives.knowledge.title}</p>
-              <div className="pl-10 space-y-0.5">
-                <p>+ <span className="font-bold">Số học:</span> {mathObjectives.knowledge.arithmetic}</p>
-                <p>+ <span className="font-bold">Hình học:</span> {mathObjectives.knowledge.geometry}</p>
-                {mathObjectives.knowledge.statistics && (
-                  <p>+ <span className="font-bold">Thống kê và Xác suất:</span> {mathObjectives.knowledge.statistics}</p>
-                )}
-              </div>
-            </div>
-            <div>
-              <p className="pl-6"><span className="font-bold">2. Về năng lực:</span> Kiểm tra và đánh giá các năng lực của HS như năng lực tư duy và lập luận toán học, năng lực giải quyết các vấn đề toán học, năng lực mô hình hóa toán học, năng lực giao tiếp toán học, năng lực sử dụng các công cụ và phương tiện học toán, thể hiện thông qua một số dạng bài tập như:</p>
-              <div className="pl-10 space-y-0.5">
-                {mathObjectives.competencies.map((comp, cIdx) => (
-                  <p key={cIdx}>– {comp}</p>
-                ))}
-              </div>
-            </div>
-            <div>
-              <p className="pl-6 font-bold">3 Về phẩm chất:</p>
-              <div className="pl-10 space-y-0.5">
-                {mathObjectives.qualities.map((qual, qIdx) => (
-                  <p key={qIdx}>+ {qual}</p>
-                ))}
-              </div>
-            </div>
+            <p className="text-justify indent-[1.27cm]"><span className="font-bold">1. Về kiến thức:</span> {mathObjectives.knowledge.title}</p>
+            <p className="text-justify indent-[1.27cm]">+ <span className="font-bold">Số học:</span> {mathObjectives.knowledge.arithmetic}</p>
+            <p className="text-justify indent-[1.27cm]">+ <span className="font-bold">Hình học:</span> {mathObjectives.knowledge.geometry}</p>
+            {mathObjectives.knowledge.statistics && (
+              <p className="text-justify indent-[1.27cm]">+ <span className="font-bold">Thống kê và Xác suất:</span> {mathObjectives.knowledge.statistics}</p>
+            )}
+            <p className="text-justify indent-[1.27cm]"><span className="font-bold">2. Về năng lực:</span> Kiểm tra và đánh giá các năng lực của HS như năng lực tư duy và lập luận toán học, năng lực giải quyết các vấn đề toán học, năng lực mô hình hóa toán học, năng lực giao tiếp toán học, năng lực sử dụng các công cụ và phương tiện học toán, thể hiện thông qua một số dạng bài tập như:</p>
+            {mathObjectives.competencies.map((comp, cIdx) => (
+              <p key={cIdx} className="text-justify indent-[1.27cm]">– {comp}</p>
+            ))}
+            <p className="text-justify indent-[1.27cm] font-bold">3. Về phẩm chất:</p>
+            {mathObjectives.qualities.map((qual, qIdx) => (
+              <p key={qIdx} className="text-justify indent-[1.27cm]">+ {qual}</p>
+            ))}
           </div>
 
           {/* II. HÌNH THỨC KIỂM TRA VÀ MA TRẬN CÂU HỎI, MA TRẬN ĐẶC TẢ. */}
-          <div className="text-[14px] leading-relaxed text-black space-y-1.5 pt-1">
-            <div className="font-bold text-[14px] uppercase tracking-wide text-black">
+          <div className="text-[13pt] leading-relaxed text-black space-y-1.5 pt-1 text-justify">
+            <div className="font-bold text-[13pt] uppercase tracking-wide text-black text-left">
               II. HÌNH THỨC KIỂM TRA VÀ MA TRẬN CÂU HỎI, MA TRẬN ĐẶC TẢ.
             </div>
-            <div className="font-bold pl-6">
+            <p className="font-bold text-justify indent-[1.27cm]">
               1. Hình thức kiểm tra.
-            </div>
-            <p className="pl-6">
-              - Thời điểm kiểm tra: Kiểm tra {period.toLowerCase()}{period.toLowerCase().includes("giữa") ? `, khi kết thúc nội dung: ${resolvedEndContent}` : "."}
             </p>
-            <p className="pl-6">
+            <p className="text-justify indent-[1.27cm]">
+              - Thời điểm kiểm tra: Kiểm tra {formatPeriodDisplayLower(period)}{period.toLowerCase().includes("giữa") ? `, khi kết thúc nội dung: ${resolvedEndContent}` : "."}
+            </p>
+            <p className="text-justify indent-[1.27cm]">
               - Thời gian làm bài: {time || (period.toLowerCase().includes("cuối") ? "90 phút." : "45 phút.")}
             </p>
-            <p className="pl-6">
+            <p className="text-justify indent-[1.27cm]">
               - Hình thức kiểm tra: {formatText}
             </p>
-            <p className="font-bold pl-6">
-              Cấu trúc:
+            <p className="font-bold text-justify indent-[1.27cm]">
+              * Cấu trúc:
             </p>
-            <p className="pl-10">
+            <p className="text-justify indent-[1.27cm]">
               - Mức độ đề: 40% Nhận biết; 30% Thông hiểu; 30% Vận dụng.
             </p>
-            <p className="pl-10">
-              - Phần trắc nghiệm 4 lựa chọn: 3,0 điểm (12 câu); Trắc nghiệm Đúng - Sai: 2,0 điểm (02 câu); Trả lời ngắn: 2,0 điểm (04 câu)
+            <p className="text-justify indent-[1.27cm]">
+              - Phần trắc nghiệm 4 lựa chọn: 3,0 điểm (12 câu); Trắc nghiệm Đúng - Sai: 2,0 điểm (02 câu); Trả lời ngắn: 2,0 điểm (04 câu).
             </p>
-            <p className="pl-10">
-              - Phần tự luận: 3,0 điểm (Vận dụng: 2,0 điểm; Thông hiểu: 1 điểm)
+            <p className="text-justify indent-[1.27cm]">
+              - Phần tự luận: 3,0 điểm (Vận dụng: 2,0 điểm; Thông hiểu: 1 điểm).
             </p>
 
-            <div className="font-bold pl-6 pt-2">
+            <p className="font-bold text-justify indent-[1.27cm] pt-2">
               2. Ma trận câu hỏi
-            </div>
+            </p>
           </div>
         </>
       ) : (
         <>
           {/* Header Tin học */}
-          <div className="flex justify-between items-start text-[14px] leading-tight pb-3">
+          <div className="flex justify-between items-start text-[13pt] leading-tight pb-3">
             <div className="text-center font-bold uppercase">
-              <p>{departmentName || "XÃ HÀM YÊN"}</p>
-              <p>{schoolName || "TRƯỜNG THCS TÂN LOAN"}</p>
+              <p className="text-[13pt]">{departmentName || "XÃ HÀM YÊN"}</p>
+              <p className="text-[13pt]">{schoolName || "TRƯỜNG THCS TÂN LOAN"}</p>
               <div className="w-20 h-[1px] bg-black mx-auto mt-1"></div>
             </div>
             <div className="text-center font-bold uppercase">
-              <p className="text-base">KHUNG MA TRẬN ĐỀ KIỂM TRA {periodUpper}</p>
-              <p>MÔN: {subject.toUpperCase()} {grade} - NĂM HỌC {schoolYear || "2026 - 2027"}</p>
-              <p className="normal-case font-normal italic text-[13px]">(Thời gian làm bài: {time || "45 phút"})</p>
+              <p className="text-[13pt]">KHUNG MA TRẬN ĐỀ KIỂM TRA {periodUpper}</p>
+              <p className="text-[13pt]">MÔN: {subject.toUpperCase()} {grade} - NĂM HỌC {schoolYear || "2026 - 2027"}</p>
+              <p className="normal-case font-normal italic text-[13pt]">(Thời gian làm bài: {time || "45 phút"})</p>
             </div>
           </div>
 
           {/* Preamble Details Tin học */}
-          <div className="text-[14px] leading-relaxed text-black space-y-1.5">
-            <div className="font-bold text-[14px] uppercase tracking-wide text-black">
+          <div className="text-[13pt] leading-relaxed text-black space-y-1.5 text-justify">
+            <div className="font-bold text-[13pt] uppercase tracking-wide text-black text-left">
               I. KHUNG MA TRẬN KIỂM TRA ĐÁNH GIÁ {periodUpper}, MÔN {subject.toUpperCase()} {grade}
             </div>
-            <p className="pl-6">
-              - Thời điểm kiểm tra: Kiểm tra {period.toLowerCase()}, khi kết thúc nội dung: {resolvedEndContent}
+            <p className="text-justify indent-[1.27cm]">
+              - Thời điểm kiểm tra: Kiểm tra {formatPeriodDisplayLower(period)}, khi kết thúc nội dung: {resolvedEndContent}
             </p>
-            <p className="pl-6">
+            <p className="text-justify indent-[1.27cm]">
               - Thời gian làm bài: {time || "45 phút"}. Hình thức kiểm tra: {formatText}
             </p>
-            <p className="font-bold pl-6">
+            <p className="font-bold text-justify indent-[1.27cm]">
               * Cấu trúc:
             </p>
-            <p className="pl-10">
+            <p className="text-justify indent-[1.27cm]">
               - Mức độ đề: 40% Nhận biết (16 câu/lệnh hỏi); 30% Thông hiểu (12 câu/lệnh hỏi); 30% Vận dụng (03 câu).
             </p>
-            <p className="pl-10">
+            <p className="text-justify indent-[1.27cm]">
               - Phần trắc nghiệm 4 lựa chọn: 3,0 điểm (12 câu - gồm 8 câu Nhận biết, 4 câu Thông hiểu); Trắc nghiệm Đúng - Sai: 4,0 điểm (04 câu - 16 lệnh hỏi gồm 8 ý Nhận biết, 8 ý Thông hiểu).
             </p>
-            <p className="pl-10">
+            <p className="text-justify indent-[1.27cm]">
               {isPractice ? "- Phần thực hành: 3,0 điểm (3 câu)" : "- Phần tự luận: 3,0 điểm (3 câu)"}
             </p>
           </div>

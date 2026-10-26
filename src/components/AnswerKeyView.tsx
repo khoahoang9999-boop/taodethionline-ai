@@ -113,22 +113,22 @@ export default function AnswerKeyView({
       </div>
 
       {/* Header */}
-      <div className="flex justify-between items-start text-[14px] leading-tight pb-2 border-b border-black">
+      <div className="flex justify-between items-start text-[13pt] leading-tight pb-2 border-b border-black">
         <div className="text-center font-bold uppercase w-[42%]">
-          <p>{departmentName || "XÃ HÀM YÊN"}</p>
-          <p className="text-[14px]">{schoolName || "TRƯỜNG THCS TÂN LOAN"}</p>
+          <p className="text-[13pt]">{departmentName || "XÃ HÀM YÊN"}</p>
+          <p className="text-[13pt]">{schoolName || "TRƯỜNG THCS TÂN LOAN"}</p>
           <div className="w-24 h-[1px] bg-black mx-auto mt-1.5"></div>
         </div>
         <div className="text-center font-bold uppercase w-[58%]">
-          <p className="text-[14px]">HƯỚNG DẪN CHẤM VÀ ĐÁP ÁN</p>
-          <p>{title}</p>
-          <p>NĂM HỌC {schoolYear || "2026 - 2027"}</p>
-          <p className="text-[13px] font-bold text-blue-900 mt-0.5">MÃ ĐỀ: {examCode}</p>
+          <p className="text-[13pt]">HƯỚNG DẪN CHẤM VÀ ĐÁP ÁN</p>
+          <p className="text-[13pt]">{title}</p>
+          <p className="text-[13pt]">NĂM HỌC {schoolYear || "2026 - 2027"}</p>
+          <p className="text-[13pt] font-bold text-blue-900 mt-0.5">MÃ ĐỀ: {examCode}</p>
           <div className="w-24 h-[1px] bg-black mx-auto mt-1.5"></div>
         </div>
       </div>
 
-      <div className="text-center font-bold text-[14px] uppercase tracking-wider text-black">
+      <div className="text-center font-bold text-[13pt] uppercase tracking-wider text-black">
         ĐÁP ÁN VÀ THANG ĐIỂM CHI TIẾT - MÃ ĐỀ {examCode}
       </div>
 
@@ -204,12 +204,32 @@ export default function AnswerKeyView({
             </table>
           </div>
 
+          {/* Answer Distribution Summary (Non-print helper) */}
+          {mcq.length > 0 && (
+            <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2 bg-emerald-50/80 border border-emerald-200 rounded-lg px-3 py-1.5 text-[12px] print:hidden">
+              <span className="font-bold text-emerald-900">Phân bố đáp án đúng ({mcq.length} câu):</span>
+              <div className="flex items-center gap-3 font-bold">
+                {(["A", "B", "C", "D"] as const).map((letter) => {
+                  const count = mcq.filter((q) => (q.correctAnswer || "A").trim().toUpperCase() === letter).length;
+                  return (
+                    <span
+                      key={letter}
+                      className="px-2 py-0.5 rounded bg-white border border-emerald-300 text-emerald-800 shadow-2xs"
+                    >
+                      Đáp án {letter}: <span className="text-blue-700 font-black">{count}</span> câu
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Detailed explanation toggle or list if needed */}
           {mcq.length > 0 && (
             <div className="mt-2 space-y-1.5 bg-gray-50 p-3 rounded-lg border border-gray-200 text-[12px]">
               <div className="flex justify-between items-center pb-1 border-b border-gray-200">
                 <p className="font-semibold text-gray-800">Giải thích chi tiết câu trắc nghiệm:</p>
-                <span className="text-[11px] text-gray-500 italic">Thầy/cô có thể chọn nhanh đáp án đúng hoặc bấm nút Sửa</span>
+                <span className="text-[11px] text-gray-500 italic">Thầy/cô có thể chọn nhanh đáp án đúng (hệ thống tự động hoán đổi phương án tương ứng) hoặc bấm nút Sửa</span>
               </div>
               <div className="grid grid-cols-1 gap-1.5 text-gray-700">
                 {mcq.map((q) => (
