@@ -204,8 +204,9 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
   const handleSaveAccountEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingAccount) return;
-    const cleanName = editUsername.trim() || editCustomerName.trim();
-    if (!cleanName) {
+    const cleanUsername = editUsername.trim() || editCustomerName.trim();
+    const cleanCustomerName = editCustomerName.trim() || cleanUsername;
+    if (!cleanUsername) {
       showToast("Tên đăng nhập không được để trống.");
       return;
     }
@@ -213,8 +214,8 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
     setIsUpdatingAccount(true);
     try {
       const result = await clientAdminUpdateAccount(adminPin, editingAccount.id, {
-        username: cleanName,
-        customerName: cleanName,
+        username: cleanUsername,
+        customerName: cleanCustomerName,
         phone: editPhone.trim(),
         notes: editNotes.trim(),
         maxDevices: Number(editMaxDevices) || 2,
@@ -223,7 +224,7 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
       });
 
       if (result && result.success) {
-        showToast(`Đã cập nhật tài khoản "${cleanName}" thành công!`);
+        showToast(`Đã cập nhật tài khoản "${cleanUsername}" thành công!`);
         setEditingAccount(null);
         fetchAccounts(adminPin);
       } else {
@@ -472,7 +473,10 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
     .filter(
       (a) =>
         a.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        a.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (a.username || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (a.customerName || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (a.password || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (a.notes || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
         a.phone.includes(searchTerm)
     )
     .sort((a, b) => {
@@ -800,8 +804,8 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
-                <th className="py-2.5 px-3">Mật Khẩu / ID</th>
-                <th className="py-2.5 px-3">Tên Đăng Nhập / SĐT</th>
+                <th className="py-2.5 px-3">Mật Khẩu / Mã TK</th>
+                <th className="py-2.5 px-3">Tên Đăng Nhập / Tên Khách / SĐT</th>
                 <th className="py-2.5 px-3">Hạn Sử Dụng / Cấp Nhanh</th>
                 <th className="py-2.5 px-3 text-center">Chế Độ & Lượt Dùng</th>
                 <th className="py-2.5 px-3 text-center">Đã Đăng Ký Máy</th>
@@ -859,7 +863,10 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
                               </span>
                             )}
                           </div>
-                          <span className="text-[10px] text-slate-500 italic">Mật khẩu</span>
+                          <div className="text-[10px] text-slate-500 flex items-center gap-1 font-medium">
+                            <span>Mật khẩu</span>
+                            {acc.id && <span className="text-slate-400 font-mono text-[9.5px]">(Mã: {acc.id})</span>}
+                          </div>
                         </div>
                       </td>
 
@@ -873,20 +880,29 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
                               className="w-full h-full object-cover"
                             />
                           </div>
-                          <div className="min-w-0 flex-1">
+                          <div className="min-w-0 flex-1 space-y-0.5">
                             <div className="flex items-center gap-1.5 group">
-                              <div className="font-bold text-slate-800 truncate">{acc.username || acc.customerName}</div>
+                              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide shrink-0">Tên ĐN:</span>
+                              <span className="font-bold text-slate-900 bg-blue-50/90 text-blue-900 border border-blue-200/80 px-2 py-0.5 rounded-md text-xs font-mono inline-flex items-center gap-1 shadow-2xs">
+                                <User className="w-3 h-3 text-blue-600 shrink-0" />
+                                <span className="truncate max-w-[140px]">{acc.username || acc.customerName || acc.id}</span>
+                              </span>
                               <button
                                 type="button"
                                 onClick={() => handleOpenEditAccount(acc)}
-                                className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-all cursor-pointer"
+                                className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-all cursor-pointer shrink-0"
                                 title="Chỉnh sửa tên đăng nhập / Avatar"
                               >
                                 <Pencil className="w-3.5 h-3.5 text-blue-600" />
                               </button>
                             </div>
-                            <div className="text-[11px] text-slate-500 flex items-center gap-2 flex-wrap">
-                              <span className="flex items-center gap-1 text-slate-400">
+                            <div className="text-[11px] font-medium text-slate-600 flex items-center gap-2 flex-wrap">
+                              {acc.customerName && acc.customerName !== acc.username && (
+                                <span className="font-semibold text-slate-700 truncate max-w-[160px]">
+                                  Khách: {acc.customerName}
+                                </span>
+                              )}
+                              <span className="flex items-center gap-1 text-slate-500">
                                 <Phone className="w-3 h-3 text-slate-400" />
                                 <span>{acc.phone || "Chưa nhập SĐT"}</span>
                               </span>
