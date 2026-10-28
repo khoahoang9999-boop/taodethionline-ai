@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Lock, X, Key, ShieldAlert, Phone, Sparkles, CheckCircle2, UserCheck, AlertCircle, Edit3, Eye, EyeOff } from "lucide-react";
 import { getDeviceId } from "../lib/device-id";
-import { clientLogin, clientUpdateProfile } from "../lib/client-auth";
+import { clientLogin, clientUpdateProfile, sanitizeUsername } from "../lib/client-auth";
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -30,10 +30,11 @@ export default function LoginModal({
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanUser = loginUsername.replace(/^@+/, "").trim();
+    const rawUser = loginUsername.replace(/^@+/, "").trim();
+    const cleanUser = sanitizeUsername(rawUser) || rawUser.toLowerCase();
     const cleanPass = code.trim();
     if (!cleanUser) {
-      setErrorMessage("Vui lòng nhập Tên đăng nhập.");
+      setErrorMessage("Vui lòng nhập Tên đăng nhập (viết liền không dấu như Gmail).");
       return;
     }
     if (!cleanPass) {
@@ -109,7 +110,7 @@ export default function LoginModal({
               <span>Hướng dẫn đăng nhập:</span>
             </div>
             <p className="text-[11.5px] leading-relaxed text-slate-700">
-              • Quý Thầy/Cô đăng nhập bằng <strong>Tên đăng nhập</strong> và <strong>Mật khẩu</strong>.<br/>
+              • Quý Thầy/Cô đăng nhập bằng <strong>Tên đăng nhập (viết liền không dấu như Gmail)</strong> và <strong>Mật khẩu</strong>.<br/>
               • Tài khoản chưa cấp hạn dùng được <strong>dùng thử 5 lần soạn đề</strong> miễn phí. Giáo viên vui lòng tự nhập <strong>Gemini API Key</strong> cá nhân nếu tài khoản chưa có Key.
             </p>
           </div>
@@ -118,7 +119,7 @@ export default function LoginModal({
             {/* 1. Login Username Input */}
             <div className="space-y-1">
               <label className="block text-xs font-bold text-slate-700">
-                1. Tên đăng nhập (*):
+                1. Tên đăng nhập (*): <span className="text-[10.5px] font-normal text-slate-500">(Viết liền không dấu như Gmail)</span>
               </label>
               <div className="relative">
                 <input
@@ -128,8 +129,13 @@ export default function LoginModal({
                     setLoginUsername(e.target.value);
                     setErrorMessage(null);
                   }}
-                  placeholder="Nhập tên đăng nhập..."
-                  className="w-full pl-9 pr-3 py-2 text-sm font-semibold text-slate-800 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                  onBlur={() => {
+                    if (loginUsername.trim()) {
+                      setLoginUsername(sanitizeUsername(loginUsername));
+                    }
+                  }}
+                  placeholder="VD: hoangkhoa123, admin..."
+                  className="w-full pl-9 pr-3 py-2 text-sm font-bold text-slate-800 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                   autoFocus
                 />
                 <UserCheck className="w-4 h-4 text-blue-500 absolute left-3 top-2.5" />

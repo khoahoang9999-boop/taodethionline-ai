@@ -14,7 +14,8 @@ import {
   clientAdminQuickRenew1Year1Day,
   clientAdminSetExpiry,
   clientAdminResetTrial,
-  isAccountLicensed
+  isAccountLicensed,
+  sanitizeUsername
 } from "../lib/client-auth";
 import {
   ShieldCheck,
@@ -204,7 +205,8 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
   const handleSaveAccountEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingAccount) return;
-    const cleanUsername = editUsername.trim() || editCustomerName.trim();
+    const rawEdit = editUsername.trim() || editCustomerName.trim();
+    const cleanUsername = sanitizeUsername(rawEdit) || rawEdit;
     const cleanCustomerName = editCustomerName.trim() || cleanUsername;
     if (!cleanUsername) {
       showToast("Tên đăng nhập không được để trống.");
@@ -240,17 +242,22 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
   useEffect(() => {
     // Auto-verify if admin
     const id = currentUser?.id?.trim().toUpperCase() || "";
-    const isAdmin = id === "TK-KHOA-2026" || id === "ADMIN123" || currentUser?.notes?.toLowerCase().includes("admin") || currentUser?.customerName?.toLowerCase().includes("admin");
+    const usernameNorm = currentUser?.username?.trim().toLowerCase() || "";
+    const nameNorm = currentUser?.customerName?.toLowerCase() || "";
+    const notesNorm = currentUser?.notes?.toLowerCase() || "";
+    const isAdmin = id === "TK-KHOA-2026" || id === "ADMIN123" || usernameNorm === "admin" || notesNorm.includes("admin") || nameNorm.includes("admin");
     if (isAdmin) {
       setAdminPin("123456");
       if (!isUnlocked) {
         setIsUnlocked(true);
         setTimeout(() => fetchAccounts("123456"), 100);
       }
-    } else if (adminPin && !isUnlocked) {
-      verifyPin(adminPin);
+    } else {
+      setIsUnlocked(false);
+      setAccounts([]);
+      setAdminPin("");
     }
-  }, [currentUser?.id, isUnlocked]);
+  }, [currentUser?.id, currentUser?.username, currentUser?.customerName, isUnlocked]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -296,9 +303,10 @@ export default function AccountManagementTab({ currentUser }: { currentUser?: an
 
   const handleCreateAccount = async (e: React.FormEvent) => {
     e.preventDefault();
-    const loginName = (newUsername.trim() || newCustomerName.trim()).trim();
+    const rawUser = newUsername.trim() || newCustomerName.trim();
+    const loginName = sanitizeUsername(rawUser) || rawUser;
     if (!loginName) {
-      showToast("Vui lòng nhập Tên đăng nhập.");
+      showToast("Vui lòng nhập Tên đăng nhập (viết liền không dấu như Gmail).");
       return;
     }
 

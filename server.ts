@@ -233,13 +233,12 @@ function normalizeMatrixPercentagesBackend(matrix: any[], isFinalExam: boolean =
   }));
 }
 
-// Helper: Cấu hình danh sách Model AI khả dụng (Ưu tiên gemini-3.5-flash-lite, tự động chuyển sang gemini-3.1-flash-lite nếu cần)
+// Helper: Cấu hình Model AI duy nhất của hệ thống (chỉ sử dụng gemini-3.1-flash-lite theo yêu cầu)
 function resolveGeminiModelName(name?: string): string {
-  if (name && (name.includes("3.5") || name.includes("3.1"))) return name;
-  return "gemini-3.5-flash-lite";
+  return "gemini-3.1-flash-lite";
 }
 
-let lastWorkingModel: string = "gemini-3.5-flash-lite";
+let lastWorkingModel: string = "gemini-3.1-flash-lite";
 let globalKeyOffset = 0;
 
 async function executeGeminiWithFailover({
@@ -273,8 +272,8 @@ async function executeGeminiWithFailover({
     rotatedPool.push({ key: cleanApiKeyString(pool[idx].key), label: pool[idx].label || `Key #${idx + 1}`, origIdx: idx });
   }
 
-  // Danh sách các Model AI hỗ trợ (ưu tiên gemini-3.5-flash-lite, tự động dự phòng gemini-3.1-flash-lite)
-  const candidateModels = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"];
+  // Chỉ sử dụng duy nhất Model gemini-3.1-flash-lite theo quy định
+  const candidateModels = ["gemini-3.1-flash-lite"];
   console.log(`[Failover Runner] Bắt đầu gọi Gemini (${candidateModels.join(", ")}) qua Pool ${pool.length} Key (Khởi đầu với Key #${startKeyIdx + 1} ${rotatedPool[0].label})...`);
 
   let lastError: any = null;
@@ -2957,7 +2956,7 @@ Chỉ trả về JSON thuần tuý, không có markdown hay bất kỳ lời d�
       }
 
       const client = new GoogleGenAI({ apiKey: cleanKey });
-      const testModels = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"];
+      const testModels = ["gemini-3.1-flash-lite"];
 
       let lastErr: any = null;
       for (const testModel of testModels) {
@@ -2988,6 +2987,15 @@ Chỉ trả về JSON thuần tuý, không có markdown hay bất kỳ lời d�
           }
         }
       }
+
+      // Fallback direct REST check if generateContent errored out (e.g. quota or busy)
+      try {
+        const checkRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(cleanKey)}`);
+        const checkData = await checkRes.json();
+        if (checkRes.ok && checkData && Array.isArray(checkData.models)) {
+          return res.json({ ok: true, message: "API Key hợp lệ và kết nối tới Google AI Studio thành công!" });
+        }
+      } catch {}
 
       const finalErrMsg = getErrorMessage(lastErr);
       if (finalErrMsg.includes("RESOURCE_EXHAUSTED") || finalErrMsg.includes("429")) {

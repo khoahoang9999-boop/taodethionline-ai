@@ -20,7 +20,7 @@ import {
   CheckCircle2
 } from "lucide-react";
 import { getDeviceId } from "../lib/device-id";
-import { clientUpdateProfile } from "../lib/client-auth";
+import { clientUpdateProfile, sanitizeUsername } from "../lib/client-auth";
 
 interface UserProfileModalProps {
   isOpen: boolean;
@@ -208,9 +208,10 @@ export default function UserProfileModal({
       setErrorMessage("Bạn chưa đăng nhập. Vui lòng đăng nhập tài khoản trước khi cập nhật!");
       return;
     }
-    const cleanName = username.trim() || customerName.trim();
+    const rawName = username.trim() || customerName.trim();
+    const cleanName = sanitizeUsername(rawName) || rawName;
     if (!cleanName) {
-      setErrorMessage("Vui lòng nhập Tên đăng nhập.");
+      setErrorMessage("Vui lòng nhập Tên đăng nhập (viết liền không dấu như Gmail).");
       return;
     }
 
@@ -529,9 +530,12 @@ export default function UserProfileModal({
 
           {/* Username Input (Tên đăng nhập) */}
           <div className="space-y-1.5">
-            <label className="block text-xs font-bold text-slate-700 flex items-center gap-1">
-              <User className="w-3.5 h-3.5 text-blue-600" />
-              Tên đăng nhập (*):
+            <label className="block text-xs font-bold text-slate-700 flex items-center justify-between">
+              <span className="flex items-center gap-1">
+                <User className="w-3.5 h-3.5 text-blue-600" />
+                Tên đăng nhập (*):
+              </span>
+              <span className="text-[10.5px] font-normal text-slate-500">(Viết liền không dấu như Gmail)</span>
             </label>
             <input
               type="text"
@@ -540,7 +544,14 @@ export default function UserProfileModal({
                 setUsername(e.target.value);
                 setCustomerName(e.target.value);
               }}
-              placeholder="Nhập tên đăng nhập..."
+              onBlur={() => {
+                if (username.trim()) {
+                  const sanitized = sanitizeUsername(username);
+                  setUsername(sanitized);
+                  setCustomerName(sanitized);
+                }
+              }}
+              placeholder="VD: hoangkhoa123, admin..."
               className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all shadow-xs"
               autoFocus
             />
@@ -591,22 +602,7 @@ export default function UserProfileModal({
             </div>
           )}
 
-          {/* Quick API Key Trigger */}
-          {onOpenApiKeyModal && (
-            <div className="pt-1">
-              <button
-                type="button"
-                onClick={() => {
-                  onClose();
-                  onOpenApiKeyModal();
-                }}
-                className="w-full py-2 px-3 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300/80 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer"
-              >
-                <Key className="w-3.5 h-3.5 text-amber-600" />
-                <span>Quản lý danh sách Gemini API Key cá nhân</span>
-              </button>
-            </div>
-          )}
+
 
           {/* Modal Footer Buttons */}
           <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">

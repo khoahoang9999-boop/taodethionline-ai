@@ -70,7 +70,24 @@ export function normalizeVietnameseName(s: string): string {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/đ/g, "d")
+    .replace(/Đ/g, "D")
     .replace(/[^a-z0-9]/g, "");
+}
+
+/**
+ * Sanitize username to continuous unaccented lowercase alphanumeric string like Gmail usernames
+ * E.g. "Hoàng Văn Khoa 123" -> "hoangvankhoa123"
+ */
+export function sanitizeUsername(str: string): string {
+  if (!str) return "";
+  return str
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D")
+    .toLowerCase()
+    .replace(/[^a-z0-9._]/g, "");
 }
 
 /**

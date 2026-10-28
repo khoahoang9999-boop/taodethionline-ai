@@ -273,6 +273,12 @@ export default function App() {
     };
   }, []);
 
+  React.useEffect(() => {
+    if (!isAdmin && mainTab === "accounts") {
+      setMainTab("config");
+    }
+  }, [isAdmin, mainTab]);
+
   const handleLogout = () => {
     setCurrentUser(null);
     setUserApiKeys([]);
@@ -283,6 +289,8 @@ export default function App() {
     localStorage.removeItem("khaothi_account_display_name");
     localStorage.removeItem("khaothi_account_data");
     localStorage.removeItem("khaothi_user_api_keys");
+    localStorage.removeItem("khaothi_admin_pin");
+    setMainTab("config");
   };
 
   const executeProtectedDownload = async (actionName: string, downloadFn: () => void) => {

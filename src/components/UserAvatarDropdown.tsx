@@ -259,34 +259,7 @@ export default function UserAvatarDropdown({
               </button>
             )}
 
-            {/* 1. Đổi ảnh đại diện (Avatar) */}
-            <button
-              type="button"
-              onClick={() => {
-                setIsOpen(false);
-                if (currentUser) {
-                  onOpenProfile();
-                } else {
-                  onLogin();
-                }
-              }}
-              className="w-full px-4 py-2.5 text-left text-xs font-semibold text-slate-700 hover:text-blue-700 hover:bg-blue-50/70 flex items-center gap-3 transition-colors cursor-pointer group"
-            >
-              <div className="w-7 h-7 rounded-lg bg-indigo-100/80 text-indigo-600 flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors shadow-xs">
-                <Camera className="w-3.5 h-3.5" />
-              </div>
-              <div className="flex-1">
-                <div className="text-slate-800 font-bold group-hover:text-indigo-700 flex items-center justify-between">
-                  <span>Thay đổi Avatar</span>
-                  <span className="text-[9.5px] bg-indigo-100 text-indigo-700 font-extrabold px-1.5 py-0.2 rounded">
-                    Tùy chỉnh
-                  </span>
-                </div>
-                <div className="text-[11px] text-slate-400 font-normal">Tải ảnh từ máy, chọn mẫu thầy/cô, ngẫu nhiên</div>
-              </div>
-            </button>
-
-            {/* 2. Hồ sơ tài khoản */}
+            {/* Hồ sơ tài khoản */}
             <button
               type="button"
               onClick={() => {
@@ -305,31 +278,6 @@ export default function UserAvatarDropdown({
               <div className="flex-1">
                 <div className="text-slate-800 font-bold group-hover:text-blue-700">Hồ sơ tài khoản</div>
                 <div className="text-[11px] text-slate-400 font-normal">Cập nhật tên đăng nhập, đơn vị công tác</div>
-              </div>
-            </button>
-
-            {/* 2. Cài đặt API Key */}
-            <button
-              type="button"
-              onClick={() => {
-                setIsOpen(false);
-                onOpenApiKey();
-              }}
-              className="w-full px-4 py-2.5 text-left text-xs font-semibold text-slate-700 hover:text-amber-700 hover:bg-amber-50/70 flex items-center gap-3 transition-colors cursor-pointer group"
-            >
-              <div className="w-7 h-7 rounded-lg bg-amber-100/70 text-amber-600 flex items-center justify-center group-hover:bg-amber-500 group-hover:text-white transition-colors">
-                <KeyRound className="w-3.5 h-3.5" />
-              </div>
-              <div className="flex-1">
-                <div className="text-slate-800 font-bold group-hover:text-amber-700 flex items-center justify-between">
-                  <span>Cài đặt API Key (Gemini)</span>
-                  {userApiKeysCount > 0 && (
-                    <span className="bg-amber-100 text-amber-800 text-[10px] px-1.5 py-0.2 rounded font-bold">
-                      {userApiKeysCount} Key
-                    </span>
-                  )}
-                </div>
-                <div className="text-[11px] text-slate-400 font-normal">Tự động luân chuyển khi hết hạn mức</div>
               </div>
             </button>
 

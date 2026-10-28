@@ -79,33 +79,100 @@ export default function ApiKeyModal({
       return;
     }
 
+    const cleanKey = keyVal
+      .replace(/[\s"'`“”‘’\u200B-\u200D\uFEFF]/g, "")
+      .replace(/^Bearer\s+/i, "")
+      .trim();
+
+    if (cleanKey.length < 20) {
+      setTestingStatus((prev) => ({
+        ...prev,
+        [id]: { loading: false, ok: false, message: "API Key quá ngắn hoặc không đúng định dạng (Key chuẩn của Google bắt đầu bằng 'AIzaSy...')." }
+      }));
+      return;
+    }
+
     setTestingStatus((prev) => ({
       ...prev,
       [id]: { loading: true }
     }));
 
+    // Step 1: Try server proxy endpoint /api/test-key
     try {
       const res = await fetch("/api/test-key", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key: keyVal.trim() })
+        body: JSON.stringify({ key: cleanKey })
       });
-      const data = await res.json();
-      if (res.ok && data.ok) {
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.ok) {
+          setTestingStatus((prev) => ({
+            ...prev,
+            [id]: { loading: false, ok: true, message: data.message || "API Key hợp lệ và hoạt động tốt!" }
+          }));
+          return;
+        } else {
+          setTestingStatus((prev) => ({
+            ...prev,
+            [id]: { loading: false, ok: false, message: data.error || "API Key không hợp lệ hoặc không thể sử dụng." }
+          }));
+          return;
+        }
+      } else {
+        const errorData = await res.json().catch(() => ({}));
+        if (errorData && errorData.error) {
+          setTestingStatus((prev) => ({
+            ...prev,
+            [id]: { loading: false, ok: false, message: errorData.error }
+          }));
+          return;
+        }
+      }
+    } catch (serverErr) {
+      console.warn("Server route /api/test-key unreachable or failed, falling back to direct Google AI API verification...", serverErr);
+    }
+
+    // Step 2: Direct Client-Side Fallback Verification via Google Generative Language API
+    // (Bypasses server proxy issues when running on static hosts or Cloudflare Workers)
+    try {
+      const googleRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(cleanKey)}`);
+      const googleData = await googleRes.json();
+
+      if (googleRes.ok && googleData && Array.isArray(googleData.models)) {
         setTestingStatus((prev) => ({
           ...prev,
-          [id]: { loading: false, ok: true, message: data.message || "Key hoạt động tốt!" }
+          [id]: { loading: false, ok: true, message: "API Key hợp lệ và kết nối trực tiếp đến Google AI Studio thành công!" }
         }));
       } else {
-        setTestingStatus((prev) => ({
-          ...prev,
-          [id]: { loading: false, ok: false, message: data.error || "Key không hợp lệ hoặc đã hết hạn mức." }
-        }));
+        const errMsg = googleData?.error?.message || "";
+        if (
+          errMsg.includes("API_KEY_INVALID") ||
+          errMsg.includes("API key not valid") ||
+          errMsg.includes("pass a valid API key") ||
+          errMsg.includes("API_KEY_NOT_FOUND")
+        ) {
+          setTestingStatus((prev) => ({
+            ...prev,
+            [id]: { loading: false, ok: false, message: "API Key không hợp lệ hoặc bị dán sai ký tự. Vui lòng lấy mã Key chuẩn tại aistudio.google.com/apikey." }
+          }));
+        } else if (errMsg.includes("429") || errMsg.includes("RESOURCE_EXHAUSTED") || errMsg.includes("quota")) {
+          setTestingStatus((prev) => ({
+            ...prev,
+            [id]: { loading: false, ok: false, message: "API Key đúng định dạng nhưng đang tạm chạm giới hạn lượt gọi miễn phí (Quota 429). Vui lòng chờ ít phút hoặc nhập thêm Key dự phòng." }
+          }));
+        } else {
+          setTestingStatus((prev) => ({
+            ...prev,
+            [id]: { loading: false, ok: false, message: errMsg ? `Không thể xác thực Key: ${errMsg}` : "Không thể kết nối máy chủ để kiểm tra Key." }
+          }));
+        }
       }
-    } catch (err: any) {
+    } catch (clientErr) {
       setTestingStatus((prev) => ({
         ...prev,
-        [id]: { loading: false, ok: false, message: "Không thể kết nối máy chủ để kiểm tra Key." }
+        [id]: { loading: false, ok: false, message: "Lỗi kết nối mạng: Không thể kết nối tới Google AI Studio để kiểm tra Key." }
       }));
     }
   };
@@ -180,7 +247,7 @@ export default function ApiKeyModal({
                 )}
               </h3>
               <p className="text-[11px] text-slate-400 flex items-center gap-1.5 flex-wrap">
-                <span>Model AI: <strong className="text-emerald-400 font-mono">gemini-3.5-flash-lite</strong></span>
+                <span>Model AI: <strong className="text-emerald-400 font-mono">gemini-3.1-flash-lite</strong></span>
                 <span>•</span>
                 <span>Tự động xoay vòng Key khi hết hạn mức</span>
               </p>
@@ -255,10 +322,10 @@ export default function ApiKeyModal({
             <div className="space-y-1">
               <p className="font-bold text-emerald-900 flex items-center gap-1.5">
                 <span>Cấu hình AI:</span>
-                <span className="font-mono bg-emerald-200/70 text-emerald-900 px-2 py-0.5 rounded text-[11px]">gemini-3.5-flash-lite / gemini-3.1-flash-lite</span>
+                <span className="font-mono bg-emerald-200/70 text-emerald-900 px-2 py-0.5 rounded text-[11px]">gemini-3.1-flash-lite</span>
               </p>
               <p className="text-emerald-800">
-                Hệ thống ưu tiên chạy trên model <strong>gemini-3.5-flash-lite</strong> (và tự động dự phòng <strong>gemini-3.1-flash-lite</strong>). Khi Key chính chạm giới hạn (Quota Limit 429), hệ thống sẽ
+                Hệ thống hoạt động duy nhất trên mô hình <strong>gemini-3.1-flash-lite</strong>. Khi Key chính chạm giới hạn (Quota Limit 429), hệ thống sẽ
                 <strong> tự động chuyển ngay sang Key tiếp theo</strong> trong danh sách của Quý Thầy/Cô mà không làm gián đoạn việc tạo đề.
               </p>
             </div>
