@@ -12,7 +12,8 @@ import {
   CheckCircle2,
   ExternalLink,
   Laptop,
-  Camera
+  Camera,
+  UserPlus
 } from "lucide-react";
 import { formatDateVN, isAccountLicensed } from "../lib/client-auth";
 
@@ -20,17 +21,19 @@ interface UserAvatarDropdownProps {
   currentUser: any;
   isAdmin: boolean;
   userApiKeysCount: number;
+  liveSeconds?: number;
   onOpenProfile: () => void;
   onOpenApiKey: () => void;
   onOpenAdminTab?: () => void;
   onLogout: () => void;
-  onLogin: () => void;
+  onLogin: (initialMode?: "login" | "register") => void;
 }
 
 export default function UserAvatarDropdown({
   currentUser,
   isAdmin,
   userApiKeysCount,
+  liveSeconds = 0,
   onOpenProfile,
   onOpenApiKey,
   onOpenAdminTab,
@@ -62,7 +65,7 @@ export default function UserAvatarDropdown({
     };
   }, [isOpen]);
 
-  const displayName = currentUser?.username || currentUser?.customerName || currentUser?.id || "Khách (Chưa đăng nhập)";
+  const displayName = currentUser?.customerName || currentUser?.username || currentUser?.id || "Khách (Chưa đăng nhập)";
   const userCode = currentUser?.id || "Chưa có mã";
   const userAvatarSrc =
     currentUser?.avatar ||
@@ -139,7 +142,7 @@ export default function UserAvatarDropdown({
                 onClick={() => {
                   setIsOpen(false);
                   if (currentUser) onOpenProfile();
-                  else onLogin();
+                  else onLogin("login");
                 }}
                 className="relative group cursor-pointer focus:outline-none"
                 title="Bấm để thay đổi ảnh đại diện (Avatar)"
@@ -223,40 +226,60 @@ export default function UserAvatarDropdown({
                       </div>
                     ) : (
                       <div className={`px-2 py-1 rounded-lg font-bold flex items-center justify-between border text-[10.5px] ${
-                        (currentUser.trialCount || 0) >= 5
+                        (currentUser.trialCount || 0) >= 3
                           ? "bg-rose-50 border-rose-200 text-rose-800"
                           : "bg-amber-50 border-amber-200 text-amber-800"
                       }`}>
-                        <span>{(currentUser.trialCount || 0) >= 5 ? "🔒 Hết 5 lượt dùng thử" : `⏳ Dùng thử: Đã dùng ${currentUser.trialCount || 0}/5 lượt`}</span>
-                        <span className="text-[10px]">{(currentUser.trialCount || 0) >= 5 ? "Khóa tạo đề" : `Còn ${Math.max(0, 5 - (currentUser.trialCount || 0))} lượt`}</span>
+                        <span>{(currentUser.trialCount || 0) >= 3 ? "🔒 Hết 3 lượt dùng thử" : `⏳ Dùng thử: Đã dùng ${currentUser.trialCount || 0}/3 lượt`}</span>
+                        <span className="text-[10px]">{(currentUser.trialCount || 0) >= 3 ? "Khóa tạo đề" : `Còn ${Math.max(0, 3 - (currentUser.trialCount || 0))} lượt`}</span>
                       </div>
                     )}
                   </div>
                 )}
+
               </div>
             )}
           </div>
 
           {/* Menu Items List */}
           <div className="py-1">
-            {/* If not logged in: prominent login action */}
+            {/* If not logged in: prominent login & register actions */}
             {!currentUser && (
-              <button
-                type="button"
-                onClick={() => {
-                  setIsOpen(false);
-                  onLogin();
-                }}
-                className="w-full px-4 py-3 text-left text-xs font-bold text-blue-700 bg-blue-50/80 hover:bg-blue-100 flex items-center gap-3 transition-colors cursor-pointer group border-b border-blue-100"
-              >
-                <div className="w-7 h-7 rounded-lg bg-blue-600 text-white flex items-center justify-center shadow-xs">
-                  <KeyRound className="w-3.5 h-3.5" />
-                </div>
-                <div className="flex-1">
-                  <div className="font-extrabold text-blue-800 text-sm">Đăng nhập tài khoản</div>
-                  <div className="text-[11px] text-blue-600 font-normal">Nhập tên và mật khẩu của bạn để sử dụng đầy đủ tính năng</div>
-                </div>
-              </button>
+              <div className="p-2 space-y-1 bg-slate-50 border-b border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsOpen(false);
+                    onLogin("login");
+                  }}
+                  className="w-full px-3 py-2.5 text-left text-xs font-bold text-blue-800 bg-blue-50/90 hover:bg-blue-100 rounded-xl flex items-center gap-2.5 transition-colors cursor-pointer group"
+                >
+                  <div className="w-7 h-7 rounded-lg bg-blue-600 text-white flex items-center justify-center shadow-xs shrink-0">
+                    <KeyRound className="w-3.5 h-3.5" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="font-extrabold text-blue-900 text-xs">Đăng nhập tài khoản</div>
+                    <div className="text-[10.5px] text-blue-700 font-normal">Sử dụng tài khoản đã có</div>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsOpen(false);
+                    onLogin("register");
+                  }}
+                  className="w-full px-3 py-2.5 text-left text-xs font-bold text-emerald-800 bg-emerald-50/90 hover:bg-emerald-100 rounded-xl flex items-center gap-2.5 transition-colors cursor-pointer group"
+                >
+                  <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center shadow-xs shrink-0">
+                    <UserPlus className="w-3.5 h-3.5" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="font-extrabold text-emerald-900 text-xs">Đăng ký tài khoản mới</div>
+                    <div className="text-[10.5px] text-emerald-700 font-normal">Tạo tài khoản dùng thử 3 lượt miễn phí</div>
+                  </div>
+                </button>
+              </div>
             )}
 
             {/* Hồ sơ tài khoản */}

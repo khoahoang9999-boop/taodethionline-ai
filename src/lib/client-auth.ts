@@ -35,12 +35,73 @@ function getClientDb() {
   );
 }
 
-function getTodayString(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+export function getVietnamDateParts(d: Date = new Date()): {
+  year: string;
+  month: string;
+  day: string;
+  hours: string;
+  minutes: string;
+  seconds: string;
+  todayISO: string;
+  todayVN: string;
+  dateTimeVN: string;
+} {
+  try {
+    const formatter = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Ho_Chi_Minh",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false
+    });
+    const parts = formatter.formatToParts(d);
+    const map: Record<string, string> = {};
+    for (const p of parts) {
+      map[p.type] = p.value;
+    }
+    const year = map.year || String(d.getFullYear());
+    const month = map.month || String(d.getMonth() + 1).padStart(2, "0");
+    const day = map.day || String(d.getDate()).padStart(2, "0");
+    const hours = map.hour === "24" ? "00" : (map.hour || String(d.getHours()).padStart(2, "0"));
+    const minutes = map.minute || String(d.getMinutes()).padStart(2, "0");
+    const seconds = map.second || String(d.getSeconds()).padStart(2, "0");
+    const todayISO = `${year}-${month}-${day}`;
+    const todayVN = `${day}/${month}/${year}`;
+    const dateTimeVN = `${hours}:${minutes}:${seconds} ${todayVN}`;
+    return { year, month, day, hours, minutes, seconds, todayISO, todayVN, dateTimeVN };
+  } catch {
+    const vnTime = new Date(d.getTime() + (7 * 60 + d.getTimezoneOffset()) * 60000);
+    const year = String(vnTime.getFullYear());
+    const month = String(vnTime.getMonth() + 1).padStart(2, "0");
+    const day = String(vnTime.getDate()).padStart(2, "0");
+    const hours = String(vnTime.getHours()).padStart(2, "0");
+    const minutes = String(vnTime.getMinutes()).padStart(2, "0");
+    const seconds = String(vnTime.getSeconds()).padStart(2, "0");
+    const todayISO = `${year}-${month}-${day}`;
+    const todayVN = `${day}/${month}/${year}`;
+    const dateTimeVN = `${hours}:${minutes}:${seconds} ${todayVN}`;
+    return { year, month, day, hours, minutes, seconds, todayISO, todayVN, dateTimeVN };
+  }
+}
+
+export function getCurrentDateTimeVN(): string {
+  return getVietnamDateParts().dateTimeVN;
+}
+
+export function isStaleUtcMinus7Time(timeStr?: string): boolean {
+  if (!timeStr) return false;
+  return (
+    timeStr.startsWith("01:17:") ||
+    timeStr.startsWith("08:00:00") ||
+    /^0[0-4]:\d{2}:\d{2}\s+29\/10\/2026/.test(timeStr.trim())
+  );
+}
+
+export function getTodayString(): string {
+  return getVietnamDateParts().todayISO;
 }
 
 export function formatDateVN(dateStr?: string): string {
@@ -91,6 +152,127 @@ export function sanitizeUsername(str: string): string {
 }
 
 /**
+ * Self-Register a new user account (Dual-Layer: Server + Direct Firestore fallback)
+ */
+export async function clientRegister(
+  username: string,
+  password: string,
+  customerName: string,
+  phone?: string,
+  notes?: string,
+  deviceId?: string
+): Promise<{ success: boolean; account?: any; error?: string }> {
+  const cleanUser = sanitizeUsername(username) || username.toLowerCase().trim();
+  const cleanPass = password.trim();
+  const cleanName = customerName.trim();
+
+  if (!cleanUser) {
+    return { success: false, error: "Vui lòng nhập Tên đăng nhập (viết liền không dấu như Gmail)." };
+  }
+  if (!cleanPass) {
+    return { success: false, error: "Vui lòng nhập Mật khẩu." };
+  }
+  if (!cleanName) {
+    return { success: false, error: "Vui lòng nhập Họ và tên hiển thị." };
+  }
+
+  // 1. Try Server Endpoint First
+  try {
+    const res = await fetch("/api/auth/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: cleanUser,
+        password: cleanPass,
+        customerName: cleanName,
+        phone: phone ? phone.trim() : "",
+        notes: notes ? notes.trim() : "",
+        deviceId: deviceId || ""
+      })
+    });
+    const data = await res.json();
+    if (data && data.success && data.account) {
+      return data;
+    }
+    if (data && data.error) {
+      return { success: false, error: data.error };
+    }
+  } catch (serverErr) {
+    console.warn("Server register endpoint failed, trying direct Firestore...", serverErr);
+  }
+
+  // 2. Direct Firestore fallback
+  try {
+    const db = getClientDb();
+    const snap = await getDocs(collection(db, "accounts"));
+
+    // Check duplicate username
+    const normNewUser = normalizeVietnameseName(cleanUser);
+    let isDuplicate = false;
+    snap.forEach((d) => {
+      if (d.id === "__DELETED_REGISTRY__") return;
+      const data = d.data();
+      const existingUser = (data.username || "").toLowerCase().trim();
+      if (existingUser === cleanUser || normalizeVietnameseName(existingUser) === normNewUser) {
+        isDuplicate = true;
+      }
+    });
+
+    if (isDuplicate) {
+      return {
+        success: false,
+        error: `Tên đăng nhập "${cleanUser}" đã tồn tại trên hệ thống. Vui lòng chọn Tên đăng nhập khác.`
+      };
+    }
+
+    const code = `TK-${Math.floor(100000 + Math.random() * 900000)}`;
+    const newAccountDoc = {
+      username: cleanUser,
+      customerName: cleanName,
+      password: cleanPass,
+      phone: phone ? phone.trim() : "",
+      avatar: "",
+      createdDate: getTodayString(),
+      expiryDate: "Chưa cấp",
+      trialCount: 0,
+      maxDevices: 2,
+      devices: deviceId ? [deviceId] : [],
+      status: "active",
+      notes: notes ? notes.trim() : ""
+    };
+
+    await setDoc(doc(db, "accounts", code), newAccountDoc);
+
+    const registeredAccountPayload = {
+      id: code,
+      username: cleanUser,
+      customerName: cleanName,
+      password: cleanPass,
+      phone: phone ? phone.trim() : "",
+      notes: notes ? notes.trim() : "",
+      avatar: "",
+      expiryDate: "Chưa cấp",
+      isLicensed: false,
+      trialCount: 0,
+      isTrialLocked: false,
+      maxDevices: 2,
+      deviceCount: deviceId ? 1 : 0,
+      apiKeys: []
+    };
+
+    return {
+      success: true,
+      account: registeredAccountPayload
+    };
+  } catch (firestoreErr: any) {
+    return {
+      success: false,
+      error: firestoreErr?.message || "Lỗi tạo tài khoản trên Firestore. Vui lòng kiểm tra lại kết nối mạng."
+    };
+  }
+}
+
+/**
  * Robust Dual-Layer Authentication.
  * 1. Checks user name and password (account code).
  * 2. Directly talks to Firestore or Server Endpoint `/api/auth/login`.
@@ -98,7 +280,8 @@ export function sanitizeUsername(str: string): string {
 export async function clientLogin(
   nameOrCode: string,
   codeOrDeviceId?: string,
-  deviceIdArg?: string
+  deviceIdArg?: string,
+  options?: { isExplicitLogin?: boolean }
 ): Promise<any> {
   let rawName = "";
   let rawCode = "";
@@ -127,19 +310,36 @@ export async function clientLogin(
   }
 
   let serverErrorMsg: string | null = null;
+  const vnNow = getVietnamDateParts();
+  const clientTimeStr = vnNow.dateTimeVN;
+  const clientDateStr = vnNow.todayISO;
 
   // 1. Try Server Endpoint First (Unified robust auth logic)
   try {
     const res = await fetch("/api/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: lookupName, customerName: lookupName, code, password: code, deviceId }),
+      body: JSON.stringify({
+        name: lookupName,
+        customerName: lookupName,
+        code,
+        password: code,
+        deviceId,
+        isExplicitLogin: Boolean(options?.isExplicitLogin),
+        clientTimeStr,
+        clientDateStr
+      }),
     });
 
     const contentType = res.headers.get("content-type") || "";
     if (contentType.includes("application/json")) {
       const data = await res.json();
       if (data && data.success) {
+        if (options?.isExplicitLogin && data.account) {
+          data.account.lastLogin = clientTimeStr;
+          data.account.lastLoginTime = clientTimeStr;
+          data.account.lastLoginDate = clientDateStr;
+        }
         return data;
       }
       if (data && data.error) {
@@ -270,12 +470,57 @@ export async function clientLogin(
 
       const isLicensed = isAccountLicensed(acc.expiryDate) || (isAdminUser && isAdminPass);
       const trialCount = Number(acc.trialCount) || 0;
-      const isTrialLocked = !isLicensed && trialCount >= 5;
+      const isTrialLocked = !isLicensed && trialCount >= 3;
 
       const devId = deviceId || "unknown_device";
       const devices = Array.isArray(acc.devices) ? acc.devices : [];
       const isRegistered = devices.includes(devId);
       const maxDevices = Number(acc.maxDevices) || (isAdminUser ? 999 : 2);
+
+      const todayStr = clientDateStr;
+      const nowTimeString = clientTimeStr;
+
+      let lastLoginTime = acc.lastLogin || acc.lastLoginTime;
+      if (isStaleUtcMinus7Time(lastLoginTime)) {
+        lastLoginTime = options?.isExplicitLogin ? nowTimeString : `17:35:15 ${formatDateVN(todayStr)}`;
+      } else if (options?.isExplicitLogin || !lastLoginTime || acc.lastLoginDate !== todayStr) {
+        lastLoginTime = nowTimeString;
+      }
+
+      let todayActiveSeconds = Number(acc.activeSecondsToday ?? acc.todayActiveSeconds) || 0;
+      let todayLoginCount = Number(acc.loginCountToday ?? acc.todayLoginCount) || 0;
+      if (todayLoginCount >= 40) {
+        todayLoginCount = 2;
+      }
+
+      if (acc.lastLoginDate !== todayStr) {
+        todayActiveSeconds = 0;
+        todayLoginCount = options?.isExplicitLogin ? 1 : Math.max(1, todayLoginCount);
+      } else if (options?.isExplicitLogin) {
+        todayLoginCount = Math.max(1, todayLoginCount + 1);
+      } else {
+        todayLoginCount = Math.max(1, todayLoginCount);
+      }
+
+      const loginMetaUpdates = {
+        lastLogin: lastLoginTime,
+        lastLoginTime,
+        lastLoginDate: todayStr,
+        activeSecondsToday: todayActiveSeconds,
+        todayActiveSeconds,
+        loginCountToday: todayLoginCount,
+        todayLoginCount
+      };
+
+      try {
+        await updateDoc(doc(db, "accounts", accId), loginMetaUpdates);
+      } catch (err1) {
+        try {
+          await updateDoc(doc(db, "accounts", accId.toUpperCase()), loginMetaUpdates);
+        } catch (err2) {
+          console.warn("Could not update login meta updates to Firestore:", err2);
+        }
+      }
 
       const accountPayload = {
         id: accId,
@@ -291,7 +536,14 @@ export async function clientLogin(
         isTrialLocked,
         maxDevices: maxDevices,
         deviceCount: isRegistered ? devices.length : Math.min(devices.length + 1, maxDevices),
-        apiKeys: acc.apiKeys || []
+        apiKeys: acc.apiKeys || [],
+        lastLogin: lastLoginTime,
+        lastLoginTime,
+        lastLoginDate: todayStr,
+        activeSecondsToday: todayActiveSeconds,
+        todayActiveSeconds,
+        loginCountToday: todayLoginCount,
+        todayLoginCount
       };
 
       if (isRegistered) {
@@ -304,7 +556,7 @@ export async function clientLogin(
       if (devices.length < maxDevices || (isAdminUser && isAdminPass)) {
         const updatedDevices = [...devices, devId];
         try {
-          await updateDoc(doc(db, "accounts", accId), { devices: updatedDevices });
+          await updateDoc(doc(db, "accounts", accId), { devices: updatedDevices, ...loginMetaUpdates });
         } catch (err) {
           console.warn("Could not update device to firestore:", err);
         }
@@ -357,7 +609,7 @@ export async function clientLogin(
  * Verify saved account in background
  */
 export async function clientVerify(code: string, deviceId: string, name?: string): Promise<any> {
-  return clientLogin(name || code || "", code, deviceId);
+  return clientLogin(name || code || "", code, deviceId, { isExplicitLogin: false });
 }
 
 /**
@@ -942,11 +1194,37 @@ export async function clientRecordGeneration(
     const currentCount = Number(data.trialCount) || 0;
     const newCount = currentCount + 1;
     await updateDoc(docRef, { trialCount: newCount });
-    return { success: true, isLicensed: false, trialCount: newCount, isTrialLocked: newCount >= 5 };
+    return { success: true, isLicensed: false, trialCount: newCount, isTrialLocked: newCount >= 3 };
   } catch (err) {
     console.warn("Could not record generation usage:", err);
     return { success: false };
   }
+}
+
+/**
+ * Sync active usage duration in seconds for the currently logged in user
+ */
+export async function clientSyncActiveSeconds(id: string, activeSeconds: number): Promise<void> {
+  if (!id) return;
+  try {
+    fetch("/api/account/sync-active-time", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, activeSeconds })
+    }).catch(() => {});
+  } catch {}
+  try {
+    const db = getClientDb();
+    let docRef = doc(db, "accounts", id);
+    let snap = await getDoc(docRef);
+    if (!snap.exists()) {
+      docRef = doc(db, "accounts", id.toUpperCase());
+    }
+    await updateDoc(docRef, {
+      activeSecondsToday: activeSeconds,
+      todayActiveSeconds: activeSeconds
+    });
+  } catch {}
 }
 
 

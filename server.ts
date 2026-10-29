@@ -1034,9 +1034,13 @@ const isAuthorizedAdmin = (adminKey: any) => {
 // Public Endpoint: Login / Activate Account with device limit check
 app.post("/api/auth/login", async (req, res) => {
   try {
-    const { name, customerName, code, deviceId } = req.body;
+    const { name, customerName, code, deviceId, isExplicitLogin, clientTimeStr, clientDateStr } = req.body;
     const userName = (name || customerName || "").trim();
-    const result = await authenticateUser(userName, code, deviceId);
+    const result = await authenticateUser(userName, code, deviceId, {
+      isExplicitLogin: isExplicitLogin !== undefined ? Boolean(isExplicitLogin) : true,
+      clientTimeStr,
+      clientDateStr
+    });
     if (!result.success) {
       return res.status(400).json(result);
     }
@@ -1046,12 +1050,100 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
+// Public Endpoint: Sync Active Seconds Today
+app.post("/api/account/sync-active-time", async (req, res) => {
+  try {
+    const { id, activeSeconds } = req.body;
+    if (!id) return res.status(400).json({ success: false });
+    const sec = Math.max(0, Number(activeSeconds) || 0);
+    await updateAccount(String(id), {
+      activeSecondsToday: sec,
+      todayActiveSeconds: sec
+    });
+    return res.json({ success: true });
+  } catch {
+    return res.json({ success: false });
+  }
+});
+
+// Public Endpoint: Self-Register New Teacher Account
+app.post("/api/auth/register", async (req, res) => {
+  try {
+    const { username, password, customerName, phone, notes, deviceId, clientTimeStr, clientDateStr } = req.body;
+    const cleanUser = (username || "").trim();
+    const cleanPass = (password || "").trim();
+    const cleanName = (customerName || "").trim();
+
+    if (!cleanUser) {
+      return res.status(400).json({ success: false, error: "Vui lòng nhập Tên đăng nhập (viết liền không dấu như Gmail)." });
+    }
+    if (!cleanPass) {
+      return res.status(400).json({ success: false, error: "Vui lòng nhập Mật khẩu." });
+    }
+    if (!cleanName) {
+      return res.status(400).json({ success: false, error: "Vui lòng nhập Họ tên hiển thị." });
+    }
+
+    const createdAccount = await createAccount({
+      username: cleanUser,
+      password: cleanPass,
+      customerName: cleanName,
+      phone: phone || "",
+      notes: notes || "",
+      expiryDate: "Chưa cấp",
+      trialCount: 0,
+      maxDevices: 2
+    });
+
+    // Auto-authenticate registered user on this device
+    const authResult = await authenticateUser(cleanUser, cleanPass, deviceId, {
+      isExplicitLogin: true,
+      clientTimeStr,
+      clientDateStr
+    });
+    if (authResult.success) {
+      return res.json({
+        success: true,
+        message: "Đăng ký tài khoản thành công!",
+        account: authResult.account
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: "Đăng ký tài khoản thành công!",
+      account: {
+        id: createdAccount.id,
+        username: createdAccount.username || cleanUser,
+        customerName: createdAccount.customerName || cleanName,
+        password: createdAccount.password || cleanPass,
+        phone: createdAccount.phone || "",
+        notes: createdAccount.notes || "",
+        avatar: createdAccount.avatar || "",
+        expiryDate: "Chưa cấp",
+        isLicensed: false,
+        trialCount: 0,
+        isTrialLocked: false,
+        maxDevices: 2,
+        deviceCount: 1,
+        apiKeys: []
+      }
+    });
+  } catch (err: any) {
+    return res.status(400).json({ success: false, error: err.message || "Lỗi khi đăng ký tài khoản." });
+  }
+});
+
 // Public Endpoint: Verify session / code
 app.post("/api/auth/verify", async (req, res) => {
   try {
-    const { name, customerName, code, deviceId } = req.body;
+    const { name, customerName, code, deviceId, clientTimeStr, clientDateStr } = req.body;
     const userName = (name || customerName || "").trim();
-    const result = await authenticateUser(userName, code, deviceId);
+    const result = await authenticateUser(userName, code, deviceId, {
+      isExplicitLogin: false,
+      clientTimeStr,
+      clientDateStr
+    });
     return res.json(result);
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message || "Lỗi hệ thống khi xác thực." });
@@ -1722,10 +1814,10 @@ Hãy xuất kết quả DƯỚI DẠNG JSON duy nhất theo cấu trúc:
         const licensed = isAccountLicensed(acc.expiryDate);
         if (!licensed) {
           const count = Number(acc.trialCount) || 0;
-          if (count >= 5) {
+          if (count >= 3) {
             return {
               allowed: false,
-              error: "Tài khoản của bạn đã sử dụng hết 5 lượt dùng thử soạn đề. Vui lòng liên hệ Admin (0989.982.818 hoặc Quản trị viên 123456) để được cấp bản quyền theo năm!"
+              error: "🔒 Tài khoản của bạn đã sử dụng hết 3 lượt dùng thử miễn phí. Vui lòng liên hệ Quản trị viên (Admin qua ĐT 0989.982.818 hoặc Zalo 0978.468.986) để được gia hạn bản quyền sử dụng mới có thể tiếp tục tạo đề!"
             };
           }
         }

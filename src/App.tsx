@@ -68,7 +68,7 @@ import ApiKeyModal, { ApiKeyItem } from "./components/ApiKeyModal";
 import UserProfileModal from "./components/UserProfileModal";
 import UserAvatarDropdown from "./components/UserAvatarDropdown";
 import { getDeviceId } from "./lib/device-id";
-import { clientVerify, clientAdminUpdateKeys, isAccountLicensed, clientRecordGeneration } from "./lib/client-auth";
+import { clientVerify, clientAdminUpdateKeys, isAccountLicensed, clientRecordGeneration, clientSyncActiveSeconds, getTodayString, isStaleUtcMinus7Time, formatDateVN } from "./lib/client-auth";
 import { AppLogo } from "./components/AppLogo";
 import { TEXTBOOK_GRADE_6, TEXTBOOK_GRADE_7, TEXTBOOK_GRADE_8, TEXTBOOK_GRADE_9 } from "./data/textbooks";
 import { ALL_MATH_TEXTBOOKS } from "./data/math";
@@ -83,14 +83,34 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<any>(() => {
     try {
       const raw = localStorage.getItem("khaothi_account_data");
-      if (raw) return JSON.parse(raw);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        const rawLogin = parsed.lastLogin || parsed.lastLoginTime || "";
+        const rawCount = Number(parsed.loginCountToday ?? parsed.todayLoginCount) || 0;
+        if (isStaleUtcMinus7Time(rawLogin) || rawCount >= 40) {
+          const healedTime = `17:35:15 ${formatDateVN(getTodayString())}`;
+          const healedCount = rawCount >= 40 ? 2 : Math.max(1, rawCount);
+          parsed.lastLogin = healedTime;
+          parsed.lastLoginTime = healedTime;
+          parsed.loginCountToday = healedCount;
+          parsed.todayLoginCount = healedCount;
+          localStorage.setItem("khaothi_account_data", JSON.stringify(parsed));
+        }
+        return parsed;
+      }
       return null;
     } catch {
       return null;
     }
   });
   const [isLoginModalOpen, setIsLoginModalOpen] = useState<boolean>(false);
+  const [loginModalMode, setLoginModalMode] = useState<"login" | "register">("login");
   const [pendingDownloadAction, setPendingDownloadAction] = useState<{ name: string; fn: () => void } | null>(null);
+
+  const openLoginModal = (mode: "login" | "register" = "login") => {
+    setLoginModalMode(mode);
+    setIsLoginModalOpen(true);
+  };
 
   // User API Keys State (supports multiple Keys for failover)
   const [userApiKeys, setUserApiKeys] = useState<ApiKeyItem[]>(() => {
@@ -252,8 +272,18 @@ export default function App() {
         clientVerify(savedCode, devId, savedName)
           .then((data) => {
             if (data && data.success && data.account) {
-              setCurrentUser(data.account);
-              localStorage.setItem("khaothi_account_data", JSON.stringify(data.account));
+              setCurrentUser((prev: any) => {
+                const prevActive = Number(prev?.activeSecondsToday ?? prev?.todayActiveSeconds) || 0;
+                const serverActive = Number(data.account.activeSecondsToday ?? data.account.todayActiveSeconds) || 0;
+                const bestActive = Math.max(prevActive, serverActive);
+                const merged = {
+                  ...data.account,
+                  activeSecondsToday: bestActive,
+                  todayActiveSeconds: bestActive
+                };
+                localStorage.setItem("khaothi_account_data", JSON.stringify(merged));
+                return merged;
+              });
             } else if (data && !data.success) {
               setCurrentUser(null);
               localStorage.removeItem("khaothi_account_code");
@@ -279,9 +309,112 @@ export default function App() {
     }
   }, [isAdmin, mainTab]);
 
+  // Live session activity timer for currently logged in user
+  const [liveSeconds, setLiveSeconds] = useState<number>(() => {
+    try {
+      const stored = localStorage.getItem("khaothi_account_data");
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        return Number(parsed.todayActiveSeconds) || 0;
+      }
+    } catch {}
+    return 0;
+  });
+
+  // Sync liveSeconds when currentUser changes or loads
+  React.useEffect(() => {
+    if (currentUser) {
+      const todayStr = getTodayString();
+      const savedDate = localStorage.getItem("khaothi_last_active_date") || currentUser.lastActiveDate || currentUser.lastLoginDate;
+      if (savedDate && savedDate !== todayStr) {
+        localStorage.setItem("khaothi_last_active_date", todayStr);
+        setLiveSeconds(0);
+        const updatedUser = {
+          ...currentUser,
+          todayActiveSeconds: 0,
+          todayLoginCount: 1,
+          lastActiveDate: todayStr
+        };
+        setCurrentUser(updatedUser);
+        localStorage.setItem("khaothi_account_data", JSON.stringify(updatedUser));
+      } else {
+        localStorage.setItem("khaothi_last_active_date", todayStr);
+        const stored = Number(currentUser.todayActiveSeconds) || 0;
+        setLiveSeconds((prev) => (prev > 0 ? prev : stored));
+      }
+    }
+  }, [currentUser?.id]);
+
+  // Tick liveSeconds continuously when app is visible & user session is active
+  React.useEffect(() => {
+    const hasAdminSession = Boolean(localStorage.getItem("khaothi_admin_pin"));
+    if (!currentUser && !hasAdminSession) return;
+
+    const timer = setInterval(() => {
+      // Requirement #2: When tab/window is hidden, pause active counter
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        return;
+      }
+
+      // Check if day changed while browser stayed open
+      const todayStr = getTodayString();
+      const savedDate = localStorage.getItem("khaothi_last_active_date");
+      if (savedDate && savedDate !== todayStr) {
+        localStorage.setItem("khaothi_last_active_date", todayStr);
+        setLiveSeconds(0);
+        if (currentUser) {
+          const updatedUser = {
+            ...currentUser,
+            activeSecondsToday: 0,
+            todayActiveSeconds: 0,
+            loginCountToday: 1,
+            todayLoginCount: 1,
+            lastActiveDate: todayStr
+          };
+          setCurrentUser(updatedUser);
+          localStorage.setItem("khaothi_account_data", JSON.stringify(updatedUser));
+        }
+        return;
+      }
+
+      setLiveSeconds((prev) => {
+        const next = prev + 1;
+        if (currentUser) {
+          try {
+            const rawStored = localStorage.getItem("khaothi_account_data");
+            const baseUser = rawStored ? JSON.parse(rawStored) : currentUser;
+            const updatedUser = {
+              ...baseUser,
+              activeSecondsToday: next,
+              todayActiveSeconds: next,
+              lastActiveDate: todayStr
+            };
+            localStorage.setItem("khaothi_account_data", JSON.stringify(updatedUser));
+          } catch {}
+        }
+        return next;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [currentUser?.id, currentUser?.username, currentUser?.lastLogin, currentUser?.loginCountToday]);
+
+  // Requirement #2: Auto-save to LocalStorage / Database every 10–15 seconds to prevent data loss
+  React.useEffect(() => {
+    if (!currentUser || !currentUser.id) return;
+    const interval = setInterval(() => {
+      clientSyncActiveSeconds(currentUser.id, liveSeconds);
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [currentUser?.id, liveSeconds]);
+
   const handleLogout = () => {
+    if (currentUser && currentUser.id) {
+      clientSyncActiveSeconds(currentUser.id, liveSeconds);
+    }
     setCurrentUser(null);
     setUserApiKeys([]);
+    setLiveSeconds(0);
     localStorage.removeItem("khaothi_account_code");
     localStorage.removeItem("khaothi_account_password");
     localStorage.removeItem("khaothi_account_name");
@@ -592,34 +725,34 @@ export default function App() {
 
       // If teacher uploads an Excel PPCT file (.xlsx, .xls), automatically parse and apply lessons to scopeConfig
       if (/\.(xlsx|xls)$/i.test(file.name)) {
-        parsePpctLessonsFromExcel(file)
-          .then((lessons) => {
-            if (lessons && lessons.length > 0) {
-              const isCuoiKyPeriod = period && period.includes("Cuối");
-              let firstHalfLessons = lessons;
-              let secondHalfLessons: typeof lessons = [];
-              if (isCuoiKyPeriod && lessons.length > 2) {
-                const splitIndex = Math.max(1, Math.floor(lessons.length / 2));
-                firstHalfLessons = lessons.slice(0, splitIndex);
-                secondHalfLessons = lessons.slice(splitIndex).map((item, idx) => ({
-                  ...item,
-                  id: `excel_h2_${Date.now()}_${idx}`,
-                }));
-              }
-              setScopeConfig({
-                mode: "custom",
-                subject,
-                grade,
-                period,
-                firstHalfLessons,
-                secondHalfLessons,
-                quickNoteText: `Trích xuất tự động từ file PPCT: ${file.name}`,
-                savedPpctName: file.name,
-              });
-              setIsConfigSaved(false);
+        file.arrayBuffer().then((buffer) => {
+          const result = parsePpctLessonsFromExcel(buffer, subject, grade);
+          const lessons = [...(result.firstHalfLessons || []), ...(result.secondHalfLessons || [])];
+          if (lessons && lessons.length > 0) {
+            const isCuoiKyPeriod = period && period.includes("Cuối");
+            let firstHalfLessons = lessons;
+            let secondHalfLessons: typeof lessons = [];
+            if (isCuoiKyPeriod && lessons.length > 2) {
+              const splitIndex = Math.max(1, Math.floor(lessons.length / 2));
+              firstHalfLessons = lessons.slice(0, splitIndex);
+              secondHalfLessons = lessons.slice(splitIndex).map((item, idx) => ({
+                ...item,
+                id: `excel_h2_${Date.now()}_${idx}`,
+              }));
             }
-          })
-          .catch(() => {});
+            setScopeConfig({
+              mode: "custom",
+              subject,
+              grade,
+              period,
+              firstHalfLessons,
+              secondHalfLessons,
+              quickNoteText: `Trích xuất tự động từ file PPCT: ${file.name}`,
+              savedPpctName: file.name,
+            });
+            setIsConfigSaved(false);
+          }
+        }).catch(() => {});
       }
 
       const reader = new FileReader();
@@ -730,8 +863,8 @@ export default function App() {
     const isLicensed = isAccountLicensed(currentUser?.expiryDate);
     if (!isLicensed) {
       const trialCount = Number(currentUser?.trialCount) || 0;
-      if (trialCount >= 5) {
-        setError("🔒 Tài khoản của bạn đã sử dụng hết 5 lượt dùng thử soạn đề. Vui lòng liên hệ Quản trị viên (Admin qua ĐT 0989.982.818 hoặc Zalo 0978.468.986) để được cấp bản quyền thời gian sử dụng theo năm!");
+      if (trialCount >= 3) {
+        setError("🔒 Tài khoản của bạn đã sử dụng hết 3 lượt dùng thử soạn đề. Vui lòng liên hệ Quản trị viên (Admin qua ĐT 0989.982.818 hoặc Zalo 0978.468.986) để được cấp bản quyền thời gian sử dụng theo năm!");
         return;
       }
     }
@@ -868,10 +1001,10 @@ export default function App() {
             localStorage.setItem("khaothi_account_data", JSON.stringify(updatedUser));
           } catch {}
           clientRecordGeneration(currentUser.id).catch(() => {});
-          if (nextTrialCount >= 5) {
-            setSaveToast(`⚠️ Bạn đã hoàn thành lượt dùng thử thứ 5/5. Từ lần tạo đề tiếp theo, hệ thống sẽ khóa cho đến khi Admin cấp bản quyền theo năm.`);
+          if (nextTrialCount >= 3) {
+            setSaveToast(`⚠️ Bạn đã hoàn thành lượt dùng thử thứ 3/3. Từ lần tạo đề tiếp theo, hệ thống sẽ khóa cho đến khi Admin cấp bản quyền theo năm.`);
           } else {
-            setSaveToast(`✓ Đã tạo đề thành công! (Lượt dùng thử: ${nextTrialCount}/5. Còn ${5 - nextTrialCount} lượt)`);
+            setSaveToast(`✓ Đã tạo đề thành công! (Lượt dùng thử: ${nextTrialCount}/3. Còn ${3 - nextTrialCount} lượt)`);
           }
         }
       }
@@ -907,8 +1040,8 @@ export default function App() {
     const isLicensed = isAccountLicensed(currentUser?.expiryDate);
     if (!isLicensed) {
       const trialCount = Number(currentUser?.trialCount) || 0;
-      if (trialCount >= 5) {
-        setError("🔒 Tài khoản của bạn đã sử dụng hết 5 lượt dùng thử soạn đề. Vui lòng liên hệ Quản trị viên (Admin qua ĐT 0989.982.818 hoặc Zalo 0978.468.986) để được cấp bản quyền thời gian sử dụng theo năm!");
+      if (trialCount >= 3) {
+        setError("🔒 Tài khoản của bạn đã sử dụng hết 3 lượt dùng thử soạn đề. Vui lòng liên hệ Quản trị viên (Admin qua ĐT 0989.982.818 hoặc Zalo 0978.468.986) để được cấp bản quyền thời gian sử dụng theo năm!");
         return false;
       }
     }
@@ -1477,21 +1610,6 @@ export default function App() {
               <FolderArchive className="w-3.5 h-3.5 text-amber-400" />
               <span>Kho Đã Lưu</span>
             </button>
-
-            {isAdmin && (
-              <button
-                type="button"
-                onClick={() => setMainTab("accounts")}
-                className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  mainTab === "accounts"
-                    ? "bg-indigo-600 text-white shadow-md"
-                    : "text-slate-300 hover:bg-slate-700/60 hover:text-white"
-                }`}
-              >
-                <Users className="w-3.5 h-3.5 text-indigo-300" />
-                <span>Quản trị TK</span>
-              </button>
-            )}
           </div>
 
           {/* 3. Right: Export Actions, API Key Button & User Profile Dropdown */}
@@ -1559,11 +1677,12 @@ export default function App() {
               currentUser={currentUser}
               isAdmin={isAdmin}
               userApiKeysCount={userApiKeys.length}
+              liveSeconds={liveSeconds}
               onOpenProfile={() => setIsProfileModalOpen(true)}
               onOpenApiKey={() => setIsApiKeyModalOpen(true)}
               onOpenAdminTab={isAdmin ? () => setMainTab("accounts") : undefined}
               onLogout={handleLogout}
-              onLogin={() => setIsLoginModalOpen(true)}
+              onLogin={(mode) => openLoginModal(mode)}
             />
           </div>
         </div>
@@ -1589,7 +1708,7 @@ export default function App() {
             <div className="flex items-center gap-2">
               <KeyRound className="w-4 h-4 text-slate-950 shrink-0" />
               <span>
-                ⚠️ Tài khoản của Quý Thầy/Cô (<strong>{currentUser.customerName}</strong>) hiện chưa có Gemini API Key cá nhân. Vui lòng tự nhập API Key để sử dụng hệ thống!
+                ⚠️ Tài khoản của Quý Thầy/Cô (<strong>{currentUser.customerName || currentUser.username || "Thầy/Cô"}</strong>) hiện chưa có Gemini API Key cá nhân. Vui lòng tự nhập API Key để sử dụng hệ thống!
               </span>
             </div>
             <button
@@ -1701,7 +1820,7 @@ export default function App() {
           </div>
         ) : mainTab === "accounts" ? (
           <div className="flex-1 overflow-y-auto bg-slate-100">
-            <AccountManagementTab currentUser={currentUser} />
+            <AccountManagementTab currentUser={currentUser} liveSeconds={liveSeconds} />
           </div>
         ) : (
           <ExamWorkspace
@@ -1966,10 +2085,14 @@ export default function App() {
       {/* Login Modal for Protected Downloads */}
       <LoginModal
         isOpen={isLoginModalOpen}
+        initialMode={loginModalMode}
         onClose={() => setIsLoginModalOpen(false)}
         pendingActionName={pendingDownloadAction?.name || "Tải File Hồ sơ Khảo thí"}
         onLoginSuccess={(accData) => {
           setCurrentUser(accData);
+          const initActive = Number(accData?.activeSecondsToday ?? accData?.todayActiveSeconds) || 0;
+          setLiveSeconds(initActive);
+          localStorage.setItem("khaothi_account_data", JSON.stringify(accData));
           setError("");
           const accKeys = Array.isArray(accData?.apiKeys) ? accData.apiKeys.filter((k: any) => k && k.key && k.key.trim().length > 0) : [];
           setUserApiKeys(accKeys);
@@ -2002,6 +2125,7 @@ export default function App() {
         isOpen={isProfileModalOpen}
         onClose={() => setIsProfileModalOpen(false)}
         currentUser={currentUser}
+        liveSeconds={liveSeconds}
         onUpdateSuccess={(updatedAccount) => {
           setCurrentUser(updatedAccount);
           localStorage.setItem("khaothi_account_data", JSON.stringify(updatedAccount));

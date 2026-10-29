@@ -21,11 +21,13 @@ import {
 } from "lucide-react";
 import { getDeviceId } from "../lib/device-id";
 import { clientUpdateProfile, sanitizeUsername } from "../lib/client-auth";
+import ActiveUsageTrackerWidget from "./ActiveUsageTrackerWidget";
 
 interface UserProfileModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentUser: any;
+  liveSeconds?: number;
   onUpdateSuccess: (updatedAccount: any) => void;
   onOpenApiKeyModal?: () => void;
 }
@@ -63,6 +65,7 @@ export default function UserProfileModal({
   isOpen,
   onClose,
   currentUser,
+  liveSeconds = 0,
   onUpdateSuccess,
   onOpenApiKeyModal
 }: UserProfileModalProps) {
@@ -85,9 +88,10 @@ export default function UserProfileModal({
 
   useEffect(() => {
     if (isOpen) {
-      const currentName = activeAccount?.username || activeAccount?.customerName || activeAccount?.id || "";
-      setUsername(currentName);
-      setCustomerName(currentName);
+      const initCustomerName = activeAccount?.customerName || activeAccount?.username || activeAccount?.id || "";
+      const initUsername = activeAccount?.username || activeAccount?.id || "";
+      setCustomerName(initCustomerName);
+      setUsername(initUsername);
       setPhone(activeAccount?.phone || "");
       setNotes(activeAccount?.notes || "");
       setAvatar(activeAccount?.avatar || "");
@@ -208,12 +212,12 @@ export default function UserProfileModal({
       setErrorMessage("Bạn chưa đăng nhập. Vui lòng đăng nhập tài khoản trước khi cập nhật!");
       return;
     }
-    const rawName = username.trim() || customerName.trim();
-    const cleanName = sanitizeUsername(rawName) || rawName;
-    if (!cleanName) {
-      setErrorMessage("Vui lòng nhập Tên đăng nhập (viết liền không dấu như Gmail).");
+    const cleanCustomerName = customerName.trim();
+    if (!cleanCustomerName) {
+      setErrorMessage("Vui lòng nhập Họ và tên giáo viên / Tên hiển thị.");
       return;
     }
+    const cleanUsername = username.trim() ? sanitizeUsername(username) : sanitizeUsername(cleanCustomerName);
 
     setIsLoading(true);
     setErrorMessage(null);
@@ -226,11 +230,11 @@ export default function UserProfileModal({
       const result = await clientUpdateProfile(
         accountId,
         deviceId,
-        cleanName,
+        cleanCustomerName,
         phone.trim(),
         notes.trim(),
         avatar,
-        cleanName
+        cleanUsername
       );
 
       if (result.success && result.account) {
@@ -243,8 +247,8 @@ export default function UserProfileModal({
         // Still save locally for immediate UI update even if offline
         const localUpdated = {
           ...activeAccount,
-          username: cleanName,
-          customerName: cleanName,
+          customerName: cleanCustomerName,
+          username: cleanUsername,
           phone: phone.trim(),
           notes: notes.trim(),
           avatar: avatar
@@ -260,8 +264,8 @@ export default function UserProfileModal({
     } catch {
       const localUpdated = {
         ...activeAccount,
-        username: cleanName,
-        customerName: cleanName,
+        customerName: cleanCustomerName,
+        username: cleanUsername,
         phone: phone.trim(),
         notes: notes.trim(),
         avatar: avatar
@@ -528,11 +532,35 @@ export default function UserProfileModal({
             </div>
           </div>
 
+          {/* Khối Thời Gian Đăng Nhập & Hoạt Động */}
+          <ActiveUsageTrackerWidget
+            lastLogin={activeAccount?.lastLogin || activeAccount?.lastLoginTime}
+            activeSecondsToday={liveSeconds || Number(activeAccount?.activeSecondsToday ?? activeAccount?.todayActiveSeconds) || 0}
+            loginCountToday={Number(activeAccount?.loginCountToday ?? activeAccount?.todayLoginCount) || 1}
+            showTitle={true}
+          />
+
+          {/* Customer / Display Name Input (Họ và tên giáo viên / người dùng) */}
+          <div className="space-y-1.5">
+            <label className="block text-xs font-bold text-slate-700 flex items-center gap-1">
+              <User className="w-3.5 h-3.5 text-blue-600" />
+              Họ và tên giáo viên / Tên hiển thị (*):
+            </label>
+            <input
+              type="text"
+              value={customerName}
+              onChange={(e) => setCustomerName(e.target.value)}
+              placeholder="VD: Hoàng Thị Nhâm, Hoàng Văn Đình Khoa..."
+              className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all shadow-xs"
+              autoFocus
+            />
+          </div>
+
           {/* Username Input (Tên đăng nhập) */}
           <div className="space-y-1.5">
             <label className="block text-xs font-bold text-slate-700 flex items-center justify-between">
               <span className="flex items-center gap-1">
-                <User className="w-3.5 h-3.5 text-blue-600" />
+                <Edit3 className="w-3.5 h-3.5 text-indigo-600" />
                 Tên đăng nhập (*):
               </span>
               <span className="text-[10.5px] font-normal text-slate-500">(Viết liền không dấu như Gmail)</span>
@@ -540,20 +568,14 @@ export default function UserProfileModal({
             <input
               type="text"
               value={username}
-              onChange={(e) => {
-                setUsername(e.target.value);
-                setCustomerName(e.target.value);
-              }}
+              onChange={(e) => setUsername(e.target.value)}
               onBlur={() => {
                 if (username.trim()) {
-                  const sanitized = sanitizeUsername(username);
-                  setUsername(sanitized);
-                  setCustomerName(sanitized);
+                  setUsername(sanitizeUsername(username));
                 }
               }}
-              placeholder="VD: hoangkhoa123, admin..."
-              className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all shadow-xs"
-              autoFocus
+              placeholder="VD: hoangnham, admin..."
+              className="w-full px-3.5 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
             />
           </div>
 
